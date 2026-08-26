@@ -1,0 +1,5 @@
+CREATE TABLE bookmaker (
+    id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name       VARCHAR(255) NOT NULL UNIQUE,
+    api_source VARCHAR(255)
+);

@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: betedge-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-betedge}
+      POSTGRES_USER: ${DB_USERNAME:-betedge}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-betedge}
+    ports:
+      # Host side moved from 5432 to 5433 (2026-08-23): a native Windows PostgreSQL 18 install,
+      # unrelated to this project (used for another course), now occupies 5432 on this machine.
+      # The container's own internal port stays 5432 - Postgres inside the container doesn't know
+      # or care which host port it's reached through; only the host-side mapping changes.
+      - "${DB_PORT:-5433}:5432"
+    volumes:
+      - betedge_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-betedge} -d ${DB_NAME:-betedge}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  betedge_pgdata:

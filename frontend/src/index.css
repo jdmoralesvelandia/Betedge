@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Surfaces */
+  --color-page: #0d0d0d;
+  --color-surface: #1a1a19;
+  --color-surface-2: #232320;
+  --color-border: rgba(255, 255, 255, 0.1);
+
+  /* Ink */
+  --color-ink: #ffffff;
+  --color-ink-soft: #c3c2b7;
+  --color-ink-faint: #898781;
+  --color-grid: #2c2c2a;
+  --color-axis: #383835;
+
+  /* Status (fixed - never repurposed for series identity) */
+  --color-good: #0ca30c;
+  --color-good-soft: #17381a;
+  --color-warning: #fab219;
+  --color-warning-soft: #3a2c10;
+  --color-critical: #d03b3b;
+  --color-critical-soft: #3a1c1c;
+
+  /* Categorical, fixed order - validated for dark-surface CVD separation */
+  --color-series-1: #3987e5;
+  --color-series-2: #d95926;
+  --color-series-3: #199e70;
+  --color-series-4: #c98500;
+  --color-series-5: #d55181;
+  --color-series-6: #4caf50;
+  --color-series-7: #9085e9;
+  --color-series-8: #e66767;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-page);
+  color: var(--color-ink);
+}
+
+::selection {
+  background-color: color-mix(in srgb, var(--color-series-1) 35%, transparent);
+}

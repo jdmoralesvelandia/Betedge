@@ -1,0 +1,29 @@
+# Secrets - real values live only in .env, never committed. .env.example ships the
+# placeholder template and IS meant to be committed - do not add a broader ".env*" pattern
+# here, it would also hide .env.example and frontend's .env.development (no secrets in either).
+.env
+
+# Backend (Maven/Spring Boot)
+target/
+
+# Frontend (Vite/Node)
+node_modules/
+dist/
+
+# Logs
+*.log
+
+# Exploratory API response dumps kept for local reference only - not project source, not
+# needed by anyone else to build/run this.
+betedge/exploracion-api/
+betedge/exploracion-odds-api/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml
+
+# Local dev-tool config (permissions, launch config) - not project source.
+.claude/

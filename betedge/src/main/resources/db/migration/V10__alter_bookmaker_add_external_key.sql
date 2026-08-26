@@ -1,0 +1,2 @@
+ALTER TABLE bookmaker
+    ADD COLUMN external_key VARCHAR(255) NOT NULL UNIQUE;

@@ -1,0 +1,154 @@
+spring:
+  application:
+    name: betedge
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+
+server:
+  port: ${SERVER_PORT:8080}
+
+jwt:
+  secret: ${JWT_SECRET}
+  expiration-ms: ${JWT_EXPIRATION_MS:3600000}
+  refresh-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:604800000}
+
+admin:
+  bootstrap-secret: ${ADMIN_BOOTSTRAP_SECRET}
+
+cors:
+  allowed-origin: ${CORS_ALLOWED_ORIGIN:http://localhost:5173}
+
+oddspapi:
+  base-url: ${ODDSPAPI_BASE_URL:https://api.oddspapi.io/v4}
+  key: ${ODDSPAPI_API_KEY}
+
+# Complementary source (Paso B) - TheOddsApiClient. Budget is 500 calls/month; mind it same as
+# OddsPapi's even though the cap is bigger. Confirmed empirically (x-requests-last header): 1
+# credit per fetchOdds call, so the naive 500/month estimate holds - no need to halve it.
+theoddsapi:
+  base-url: ${THEODDSAPI_BASE_URL:https://api.the-odds-api.com/v4}
+  key: ${THEODDSAPI_API_KEY}
+
+odds-ingestion:
+  # OddsPapi requires exactly one 'bookmaker' AND at most 5 'tournamentIds' per
+  # /odds-by-tournaments call. With 5 tracked leagues (Bundesliga and Brasileirão dropped - see
+  # V19__narrow_league_coverage.sql) that's 1 tournament-id batch, so each cycle costs
+  # (bookmakers x batches) calls: 3 x 1 = 3. IngestionScheduler now runs at 2 fixed local times/day
+  # (4am, 1pm America/Bogota - see its @Scheduled crons) instead of a fixed interval: 3 calls x 2
+  # cycles/day x 30 days = 180/month, PLUS ReferenceDataScheduler's own 1 call/sync x 1 sync/day x
+  # 30 days = 30/month -> 210/month scheduled between the two schedulers. Budget is 250/month
+  # total, leaving 40/month (~6 manual triggers) as margin - same margin as before this rework,
+  # since dropping 2 leagues (fewer batches) and doubling cycles/day (cron vs the old 24h
+  # fixedRate) cancel out almost exactly. Recompute BOTH this scheduler and theoddsapi-ingestion's
+  # below if the bookmaker list, the tracked-league count, or either cron schedule changes - don't
+  # budget this block in isolation.
+  # pinnacle is the sharp reference book the true-probability estimate is built from; betano and
+  # betplay replace bet365/unibet as the tracked retail books (2026-08-23 ingestion overhaul).
+  # betano here is OddsPapi's generic/global slug "betano" (cloneOf: null) - NOT a regional
+  # variant like betano.bet.br/.cz/.pt, which are also real, non-cloned, independent entries in
+  # the catalog; confirm this is the intended one before enabling. betplay is "betplay"
+  # (cloneOf: null) - distinct from "betplay.io", which IS a clone of roobet. Both confirmed
+  # against the real OddsPapi GET /bookmakers catalog on 2026-08-23; see V20__seed_betano_betplay_bookmakers.sql.
+  bookmakers: ${ODDS_INGESTION_BOOKMAKERS:pinnacle,betano,betplay}
+  scheduling-enabled: ${ODDS_INGESTION_SCHEDULING_ENABLED:true}
+
+# Paso C - independent scheduler, separate from odds-ingestion above. Covers the 5 competitions
+# with a "theoddsapi" externalKeys entry after V19 (La Liga, Premier League, Serie A, Bundesliga,
+# Ligue 1 - Champions League never had one, Brasileirão's was cleared), 1 call each = 5
+# calls/cycle. TheOddsApiIngestionScheduler now runs at 3 fixed local times/day (7am, 10am, 2pm
+# America/Bogota - see its @Scheduled crons) instead of a 12h fixed interval: 5 calls x 3
+# cycles/day x 30 days = 450/month. This scheduler doesn't own the whole 500/month cap either -
+# see hot-refresh below, which shares it: 450 + hot-refresh's own 100/month = 550/month scheduled
+# - THIS IS OVER the real 500/month cap by 50/month, unlike before this rework (was 460/month,
+# 40/month under). Going from 2 to 3 cycles/day cost more budget than dropping Brasileirão saved.
+# Left as specified (2026-08-23) rather than silently changed - resolve the overage (drop a cron
+# time, lower hot-refresh's monthly-budget, or accept it against a real 500/month check) before
+# turning scheduling-enabled on for real. Recompute BOTH theoddsapi schedulers together if either
+# cron schedule, the tracked-league count, or hot-refresh's budget changes - don't budget this
+# block in isolation. scheduling-enabled defaults to false (unlike odds-ingestion's true): this
+# pipeline hasn't run in production yet, so it stays off until turned on deliberately.
+theoddsapi-ingestion:
+  scheduling-enabled: ${THEODDSAPI_INGESTION_SCHEDULING_ENABLED:false}
+
+# Tighter-cycle refresh for matches about to kick off - odds move fastest in the final hour.
+# The check itself (HotMatchRefreshService querying for competitions with a Match in the window)
+# costs nothing; only an actual trigger spends a real call, and monthly-budget is the hard cap on
+# that spend (independent of theoddsapi-ingestion's own budget - see IngestionRun.triggeredBy).
+# 50/month, reduced from 100 on 2026-08-23: theoddsapi-ingestion moved to 3 cycles/day and now
+# commits 450/month on its own (see its comment), leaving exactly 500 - 450 = 50/month of the real
+# 500/month cap for this budget - no margin left under that 50, it IS the remaining margin. If
+# hot-refresh is ever turned back on (HOT_REFRESH_SCHEDULING_ENABLED), re-check whether 50/month
+# is still realistic first - don't just flip the flag assuming this number is still current;
+# recheck against theoddsapi-ingestion's actual committed total at that time. No per-league
+# cooldown or daily cap needed on top of it: with a 60-minute window and a 30-minute check
+# interval, the calendar itself mathematically guarantees at least 1 real refresh per match
+# (almost always 2). scheduling-enabled defaults to false, same reasoning as theoddsapi-ingestion.
+hot-refresh:
+  final-hour-window-minutes: ${FINAL_HOUR_WINDOW_MINUTES:60}
+  check-interval-ms: ${HOT_REFRESH_CHECK_INTERVAL:1800000}
+  monthly-budget: ${HOT_REFRESH_MONTHLY_BUDGET:50}
+  scheduling-enabled: ${HOT_REFRESH_SCHEDULING_ENABLED:false}
+
+# Pure DB housekeeping (no external calls, no API budget) - deliberately reuses
+# hot-refresh.check-interval-ms above ("misma frecuencia" by design, see MatchStatusUpdateScheduler)
+# rather than its own separate interval property. Own scheduling-enabled, independent of
+# hot-refresh's: this one carries no budget risk, but stays off by default until we decide
+# together the whole system is ready, same as every other new scheduler this session.
+match-status-update:
+  duration-hours: ${MATCH_DURATION_HOURS:2}
+  scheduling-enabled: ${MATCH_STATUS_UPDATE_SCHEDULING_ENABLED:false}
+
+reference-data-sync:
+  interval-ms: ${REFERENCE_DATA_SYNC_INTERVAL:86400000}
+  scheduling-enabled: ${REFERENCE_DATA_SYNC_SCHEDULING_ENABLED:true}
+
+opportunity:
+  # Double the ingestion interval above, so one missed/delayed cycle doesn't blank the active list.
+  staleness-hours: ${OPPORTUNITY_STALENESS_HOURS:48}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+  datasource:
+    # Port fallback is 5433, not Postgres's default 5432 (2026-08-23): a native Windows PostgreSQL
+    # 18 install for another course occupies 5432 on this machine - see docker-compose.yml.
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:betedge}
+    username: ${DB_USERNAME:betedge}
+    password: ${DB_PASSWORD:betedge}
+  jpa:
+    show-sql: true
+
+jwt:
+  refresh-cookie-secure: ${JWT_REFRESH_COOKIE_SECURE:false}
+
+logging:
+  level:
+    com.betedge: DEBUG
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    show-sql: false
+
+jwt:
+  refresh-cookie-secure: ${JWT_REFRESH_COOKIE_SECURE:true}
+
+logging:
+  level:
+    com.betedge: INFO
