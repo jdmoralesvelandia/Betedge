@@ -157,12 +157,24 @@ class TheOddsApiIngestionServiceTest {
     }
 
     private static OddsPapiFixtureDto oddsPapiFixture() {
-        Map<String, OddsPapiPlayerPriceDto> players = Map.of(
-                "p1", new OddsPapiPlayerPriceDto(true, "home", new BigDecimal("1.80")),
-                "p2", new OddsPapiPlayerPriceDto(true, "away", new BigDecimal("4.20")),
-                "p3", new OddsPapiPlayerPriceDto(true, "draw", new BigDecimal("3.60")));
-        OddsPapiMarketDto moneyline = new OddsPapiMarketDto("101/0/moneyline", true, Map.of("o1", new OddsPapiOutcomeDto(players)));
-        OddsPapiBookmakerOddsDto pinnacleOdds = new OddsPapiBookmakerOddsDto(true, false, Map.of("m1", moneyline));
+        // One OddsPapiOutcomeDto per selection, keyed by OddsPapi's own outcome id (101/102/103) -
+        // IngestionService.OUTCOME_KEY_TO_SELECTION reads the selection from this outer map key,
+        // not from OddsPapiPlayerPriceDto.bookmakerOutcomeId (that field is bookmaker-internal and
+        // only ever used as-is for Odds.selection on the OLD, pre-fix code path). bookmakerOutcomeId
+        // is set to a realistic opaque value here precisely to make clear it's NOT what selection
+        // comes from.
+        OddsPapiOutcomeDto homeOutcome = new OddsPapiOutcomeDto(
+                Map.of("p1", new OddsPapiPlayerPriceDto(true, "48601", new BigDecimal("1.80"))));
+        OddsPapiOutcomeDto drawOutcome = new OddsPapiOutcomeDto(
+                Map.of("p1", new OddsPapiPlayerPriceDto(true, "48602", new BigDecimal("3.60"))));
+        OddsPapiOutcomeDto awayOutcome = new OddsPapiOutcomeDto(
+                Map.of("p1", new OddsPapiPlayerPriceDto(true, "48603", new BigDecimal("4.20"))));
+        OddsPapiMarketDto moneyline = new OddsPapiMarketDto(
+                "101/0/moneyline", true, Map.of("101", homeOutcome, "102", drawOutcome, "103", awayOutcome));
+        // Key must be the real OddsPapi market id ("101"), not an arbitrary placeholder -
+        // OddsPapiMarketDto.isFullTimeMoneyline requires the caller's own map key (this one) to be
+        // exactly "101", on top of the bookmakerMarketId suffix check - see its class Javadoc.
+        OddsPapiBookmakerOddsDto pinnacleOdds = new OddsPapiBookmakerOddsDto(true, false, Map.of("101", moneyline));
         return new OddsPapiFixtureDto(
                 RECONCILING_FIXTURE_ID, 101L, 102L,
                 Integer.valueOf(PREMIER_LEAGUE_ODDSPAPI_TOURNAMENT_ID), KICKOFF, Map.of("pinnacle", pinnacleOdds));
