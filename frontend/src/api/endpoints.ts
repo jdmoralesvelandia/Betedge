@@ -24,10 +24,14 @@ export const endpoints = {
   oddsHistory: (fetcher: Fetcher, matchId: number) =>
     fetcher<OddsHistoryEntryDto[]>(`/odds/history?matchId=${matchId}`),
 
-  matches: (fetcher: Fetcher, filters?: { competitionId?: number; search?: string }) => {
+  matches: (
+    fetcher: Fetcher,
+    filters?: { competitionId?: number; search?: string; finishedWithinDays?: number },
+  ) => {
     const params = new URLSearchParams()
     if (filters?.competitionId != null) params.set('competitionId', String(filters.competitionId))
     if (filters?.search) params.set('search', filters.search)
+    if (filters?.finishedWithinDays != null) params.set('finishedWithinDays', String(filters.finishedWithinDays))
     const query = params.toString()
     return fetcher<MatchDto[]>(`/matches${query ? `?${query}` : ''}`)
   },

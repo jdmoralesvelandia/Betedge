@@ -16,6 +16,17 @@ const STATUS_BADGE: Record<MatchStatus, { label: string; className: string }> = 
   FINISHED: { label: 'Finalizado', className: 'bg-surface-2 text-ink-faint' },
 }
 
+// Mirrors MatchQueryService's own defaults/sentinel on the backend - see its Javadoc.
+const DEFAULT_FINISHED_WITHIN_DAYS = 7
+const SHOW_ALL_FINISHED_SENTINEL = 0
+
+const FINISHED_WINDOW_OPTIONS = [
+  { value: 7, label: 'Últimos 7 días' },
+  { value: 30, label: 'Últimos 30 días' },
+  { value: 90, label: 'Últimos 3 meses' },
+  { value: SHOW_ALL_FINISHED_SENTINEL, label: 'Todos' },
+] as const
+
 export function MatchesPage() {
   const { apiFetch } = useAuth()
   const [matches, setMatches] = useState<MatchDto[] | null>(null)
@@ -24,9 +35,11 @@ export function MatchesPage() {
   const [competitionId, setCompetitionId] = useState<number | null>(null)
   const [searchInput, setSearchInput] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [finishedWithinDays, setFinishedWithinDays] = useState<number>(DEFAULT_FINISHED_WITHIN_DAYS)
   const [error, setError] = useState<string | null>(null)
 
   const hasActiveFilters = competitionId !== null || debouncedSearch.trim() !== ''
+  const isShowingAllFinished = finishedWithinDays === SHOW_ALL_FINISHED_SENTINEL
 
   useEffect(() => {
     let cancelled = false
@@ -53,7 +66,11 @@ export function MatchesPage() {
   useEffect(() => {
     let cancelled = false
     endpoints
-      .matches(apiFetch, { competitionId: competitionId ?? undefined, search: debouncedSearch.trim() || undefined })
+      .matches(apiFetch, {
+        competitionId: competitionId ?? undefined,
+        search: debouncedSearch.trim() || undefined,
+        finishedWithinDays,
+      })
       .then((data) => {
         if (!cancelled) setMatches(data)
       })
@@ -64,7 +81,7 @@ export function MatchesPage() {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [competitionId, debouncedSearch])
+  }, [competitionId, debouncedSearch, finishedWithinDays])
 
   return (
     <Layout>
@@ -78,7 +95,7 @@ export function MatchesPage() {
         <LastUpdatedBadge timestamp={lastUpdated} />
       </div>
 
-      <div className="mb-6 flex flex-wrap items-center gap-3">
+      <div className="mb-2 flex flex-wrap items-center gap-3">
         <select
           value={competitionId ?? ''}
           onChange={(e) => setCompetitionId(e.target.value ? Number(e.target.value) : null)}
@@ -100,7 +117,26 @@ export function MatchesPage() {
           aria-label="Buscar equipo"
           className="min-w-0 flex-1 rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-ink placeholder:text-ink-faint sm:max-w-xs"
         />
+        <label className="flex items-center gap-2 text-sm text-ink-soft">
+          <span className="whitespace-nowrap">Finalizados:</span>
+          <select
+            value={finishedWithinDays}
+            onChange={(e) => setFinishedWithinDays(Number(e.target.value))}
+            aria-label="Finalizados"
+            className="rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-ink-soft"
+          >
+            {FINISHED_WINDOW_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
+      <p className="mb-6 text-xs text-ink-faint">
+        Este filtro solo esconde partidos ya finalizados hace tiempo - los próximos y los que están en vivo siempre se
+        muestran.
+      </p>
 
       {error && (
         <p className="mb-6 rounded-md bg-critical-soft px-3 py-2 text-sm text-critical" role="alert">
@@ -114,11 +150,19 @@ export function MatchesPage() {
         <EmptyState
           icon="search"
           title="No se encontraron partidos con esos filtros"
-          description="Prueba con otra liga o con otro nombre de equipo."
+          description="Prueba con otra liga, otro nombre de equipo, o ampliando el filtro de Finalizados."
         />
       )}
 
-      {matches !== null && matches.length === 0 && !hasActiveFilters && (
+      {matches !== null && matches.length === 0 && !hasActiveFilters && !isShowingAllFinished && (
+        <EmptyState
+          icon="calm"
+          title="No hay partidos dentro de esta ventana"
+          description="Puede que solo haya partidos finalizados hace más tiempo del que muestra el filtro actual. Prueba cambiando Finalizados a Todos."
+        />
+      )}
+
+      {matches !== null && matches.length === 0 && !hasActiveFilters && isShowingAllFinished && (
         <EmptyState
           icon="calm"
           title="Todavía no se ha ingerido ningún partido"

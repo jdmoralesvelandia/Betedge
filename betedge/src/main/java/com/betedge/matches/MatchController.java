@@ -18,8 +18,9 @@ public class MatchController {
     @GetMapping
     public List<MatchResponse> listMatches(
             @RequestParam(required = false) Long competitionId,
-            @RequestParam(required = false) String search) {
-        return matchQueryService.findAll(competitionId, search);
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) Integer finishedWithinDays) {
+        return matchQueryService.findAll(competitionId, search, finishedWithinDays);
     }
 
     @GetMapping("/{id}")
