@@ -28,11 +28,20 @@ public class IngestionAdminController {
         return theOddsApiIngestionService.runIngestion(TriggeredBy.MANUAL);
     }
 
-    /** The most recent ingestion run (scheduled or manual), or 204 if none has run yet. */
+    /** The most recent OddsPapi ingestion run (scheduled or manual), or 204 if none has run yet. */
     @GetMapping("/last-run")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<IngestionRunResponse> lastRun() {
         return ingestionService.findLastRun()
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    /** The most recent The Odds API run (scheduled, manual, or hot-refresh), or 204 if none has run yet. */
+    @GetMapping("/last-run-theoddsapi")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<IngestionRunResponse> lastRunTheOddsApi() {
+        return theOddsApiIngestionService.findLastRun()
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }

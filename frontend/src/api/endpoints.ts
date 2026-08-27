@@ -38,4 +38,9 @@ export const endpoints = {
     fetcher<IngestionRunDto>('/admin/ingestion/trigger', { method: 'POST' }),
   lastIngestionRun: (fetcher: Fetcher) =>
     fetcher<IngestionRunDto | undefined>('/admin/ingestion/last-run'),
+
+  triggerTheOddsApiIngestion: (fetcher: Fetcher) =>
+    fetcher<IngestionRunDto>('/admin/ingestion/trigger-theoddsapi', { method: 'POST' }),
+  lastTheOddsApiIngestionRun: (fetcher: Fetcher) =>
+    fetcher<IngestionRunDto | undefined>('/admin/ingestion/last-run-theoddsapi'),
 }

@@ -150,6 +150,123 @@ class MatchReconciliationServiceTest {
         assertThat(cityResult).contains(cityFixture);
     }
 
+    @Test
+    void treatsAmpersandAndAndAsEquivalent() {
+        Match candidate = match("Brighton & Hove Albion", "Aston Villa", KICKOFF);
+
+        Optional<Match> result = MatchReconciliationService.findMatchingCandidate(
+                List.of(candidate), "Brighton and Hove Albion", "Aston Villa", KICKOFF);
+
+        assertThat(result).contains(candidate);
+    }
+
+    @Test
+    void treatsHyphenatedAndSpacedNamesAsEquivalent() {
+        Match candidate = match("Lille OSC", "Paris Saint-Germain", KICKOFF);
+
+        Optional<Match> result = MatchReconciliationService.findMatchingCandidate(
+                List.of(candidate), "Lille", "Paris Saint Germain", KICKOFF);
+
+        assertThat(result).contains(candidate);
+    }
+
+    @Test
+    void stripsLeadingRcPrefix() {
+        Match candidate = match("RC Lens", "Nice", KICKOFF);
+
+        Optional<Match> result = MatchReconciliationService.findMatchingCandidate(
+                List.of(candidate), "Racing Club De Lens", "Nice", KICKOFF);
+
+        assertThat(result).contains(candidate);
+    }
+
+    @Test
+    void stripsMultipleStackedSuffixesInOnePass() {
+        // OddsPapi-style Brasileirão names stack a club suffix AND a 2-letter state code.
+        Match candidate = match("Sao Paulo FC SP", "Coritiba FC PR", KICKOFF);
+
+        Optional<Match> result = MatchReconciliationService.findMatchingCandidate(
+                List.of(candidate), "Sao Paulo", "Coritiba", KICKOFF);
+
+        assertThat(result).contains(candidate);
+    }
+
+    @Test
+    void doesNotForceAMatchWhenNormalizationWouldLeaveNamesTooShort() {
+        // A team literally named "FC" would normalize to "" after suffix-stripping - must never
+        // match anything by accident just because an empty/tiny string is trivially "contained".
+        Match candidate = match("FC", "Chelsea", KICKOFF);
+
+        Optional<Match> result = MatchReconciliationService.findMatchingCandidate(
+                List.of(candidate), "FC", "Chelsea", KICKOFF);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void resolvesKnownAliasCeltaDeVigo() {
+        Match candidate = match("RC Celta de Vigo", "CA Osasuna", KICKOFF);
+
+        Optional<Match> result = MatchReconciliationService.findMatchingCandidate(
+                List.of(candidate), "Celta Vigo", "CA Osasuna", KICKOFF);
+
+        assertThat(result).contains(candidate);
+    }
+
+    @Test
+    void resolvesKnownAliasDeportivoLaCoruna() {
+        Match candidate = match("RC Deportivo de La Coruna", "Valencia CF", KICKOFF);
+
+        Optional<Match> result = MatchReconciliationService.findMatchingCandidate(
+                List.of(candidate), "Deportivo La Coruna", "Valencia", KICKOFF);
+
+        assertThat(result).contains(candidate);
+    }
+
+    @Test
+    void resolvesKnownAliasRacingSantander() {
+        Match candidate = match("Racing Santander", "Real Betis", KICKOFF);
+
+        Optional<Match> result = MatchReconciliationService.findMatchingCandidate(
+                List.of(candidate), "Real Racing Club de Santander", "Real Betis", KICKOFF);
+
+        assertThat(result).contains(candidate);
+    }
+
+    @Test
+    void resolvesKnownAliasStadeRennaisVsRennes() {
+        Match candidate = match("Stade Rennais FC", "Lyon", KICKOFF);
+
+        Optional<Match> result = MatchReconciliationService.findMatchingCandidate(
+                List.of(candidate), "Rennes", "Lyon", KICKOFF);
+
+        assertThat(result).contains(candidate);
+    }
+
+    @Test
+    void resolvesKnownAliasKolnVsCologneEvenWithRealDiacritic() {
+        // The stored Match text keeps the real German spelling with its diacritic - normalize()
+        // strips accents for comparison only, it never rewrites what's persisted.
+        Match candidate = match("1. FC Köln", "TSG Hoffenheim", KICKOFF);
+
+        Optional<Match> result = MatchReconciliationService.findMatchingCandidate(
+                List.of(candidate), "1. FC Cologne", "TSG Hoffenheim", KICKOFF);
+
+        assertThat(result).contains(candidate);
+    }
+
+    @Test
+    void aliasGroupsDoNotLeakIntoUnrelatedComparisons() {
+        // Sanity check that being in a KNOWN_ALIAS_GROUPS entry doesn't make a name match
+        // something outside its own group - Rennes must still not match an unrelated club.
+        Match candidate = match("Stade Rennais FC", "Lyon", KICKOFF);
+
+        Optional<Match> result = MatchReconciliationService.findMatchingCandidate(
+                List.of(candidate), "Marseille", "Lyon", KICKOFF);
+
+        assertThat(result).isEmpty();
+    }
+
     private static Match match(String homeTeam, String awayTeam, Instant startTime) {
         Match match = new Match();
         match.setHomeTeam(homeTeam);

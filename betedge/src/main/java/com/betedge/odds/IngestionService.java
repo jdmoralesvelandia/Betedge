@@ -57,6 +57,7 @@ public class IngestionService {
     private final IngestionRunRepository ingestionRunRepository;
     private final OddsPapiClient oddsPapiClient;
     private final ReferenceDataSyncService referenceDataSyncService;
+    private final MatchReconciliationService matchReconciliationService;
     private final ValueBetCalculationService valueBetCalculationService;
     private final SurebetCalculationService surebetCalculationService;
 
@@ -137,7 +138,8 @@ public class IngestionService {
     /** The most recent ingestion run (scheduled or manual), or empty if none has run yet. */
     @Transactional(readOnly = true)
     public Optional<IngestionRunResponse> findLastRun() {
-        return ingestionRunRepository.findTopByOrderByFinishedAtDesc().map(IngestionRunResponse::from);
+        return ingestionRunRepository.findTopByProviderOrderByFinishedAtDesc(DataSource.ODDSPAPI)
+                .map(IngestionRunResponse::from);
     }
 
     public Instant getMostRecentOddsTimestamp() {
@@ -228,20 +230,45 @@ public class IngestionService {
         return match;
     }
 
+    /**
+     * OddsPapi is the primary source, but it isn't guaranteed to be the FIRST to see a given
+     * real-world fixture: The Odds API runs on its own independent schedule and can ingest (and
+     * create a Match for) the same fixture first. Without this reconciliation attempt, that
+     * ordering alone used to produce a silent duplicate - two Match rows for one real game, split
+     * ODDSPAPI vs THEODDSAPI Odds between them - regardless of how good the name-matching logic
+     * was, simply because this path never even tried it. Mirrors
+     * TheOddsApiIngestionService.findOrCreateMatch's own reconciliation step exactly: on a
+     * successful reconcile, the existing row (whatever its externalId or original source) is
+     * reused as-is - never overwritten - same as that side does. Nothing in this codebase reads
+     * Match.externalId's format to infer which provider "owns" a Match (confirmed 2026-08-27 -
+     * its only functional use anywhere is the exact-string findByExternalId lookup below), so a
+     * Match created by The Odds API keeping its "theoddsapi:"-prefixed externalId after OddsPapi
+     * reconciles onto it is safe.
+     */
     private MatchLookup findOrCreateMatch(
             OddsPapiFixtureDto fixture, Competition competition, Map<String, String> participantNames) {
-        return matchRepository.findByExternalId(fixture.fixtureId())
-                .map(match -> new MatchLookup(match, false))
-                .orElseGet(() -> {
-                    Match match = new Match();
-                    match.setCompetition(competition);
-                    match.setExternalId(fixture.fixtureId());
-                    match.setHomeTeam(resolveParticipantName(fixture.participant1Id(), participantNames));
-                    match.setAwayTeam(resolveParticipantName(fixture.participant2Id(), participantNames));
-                    match.setStartTime(fixture.startTime());
-                    match.setStatus(MatchStatus.SCHEDULED);
-                    return new MatchLookup(matchRepository.save(match), true);
-                });
+        Optional<Match> existing = matchRepository.findByExternalId(fixture.fixtureId());
+        if (existing.isPresent()) {
+            return new MatchLookup(existing.get(), false);
+        }
+
+        String homeTeam = resolveParticipantName(fixture.participant1Id(), participantNames);
+        String awayTeam = resolveParticipantName(fixture.participant2Id(), participantNames);
+
+        Optional<Match> reconciled = matchReconciliationService.findMatchingCandidate(
+                competition, homeTeam, awayTeam, fixture.startTime());
+        if (reconciled.isPresent()) {
+            return new MatchLookup(reconciled.get(), false);
+        }
+
+        Match match = new Match();
+        match.setCompetition(competition);
+        match.setExternalId(fixture.fixtureId());
+        match.setHomeTeam(homeTeam);
+        match.setAwayTeam(awayTeam);
+        match.setStartTime(fixture.startTime());
+        match.setStatus(MatchStatus.SCHEDULED);
+        return new MatchLookup(matchRepository.save(match), true);
     }
 
     private static String resolveParticipantName(Long participantId, Map<String, String> participantNames) {

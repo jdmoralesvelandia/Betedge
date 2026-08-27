@@ -18,7 +18,9 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestClientException;
 
 /**
@@ -63,6 +65,10 @@ public class TheOddsApiIngestionService {
     private final ValueBetCalculationService valueBetCalculationService;
     private final SurebetCalculationService surebetCalculationService;
 
+    /** Curated set actually ingested per cycle - see theoddsapi-ingestion.bookmakers in application.yml. */
+    @Value("${theoddsapi-ingestion.bookmakers}")
+    private List<String> targetBookmakers;
+
     /** Fetches and ingests every competition The Odds API covers - see {@link #refreshCompetition} for a single one. */
     public IngestionRunResponse runIngestion(TriggeredBy triggeredBy) {
         Instant startedAt = Instant.now();
@@ -102,6 +108,18 @@ public class TheOddsApiIngestionService {
         Map<Long, Match> touchedMatches = new LinkedHashMap<>();
         CompetitionBreakdownEntry breakdown = ingestCompetition(competition, touchedMatches);
         return finishRun(triggeredBy, startedAt, touchedMatches, List.of(breakdown));
+    }
+
+    /**
+     * The most recent The Odds API run (scheduled, manual, or hot-refresh), or empty if none has
+     * run yet. Scoped to provider=THEODDSAPI - see the comment on
+     * IngestionRunRepository.findTopByProviderOrderByFinishedAtDesc for why an unscoped query
+     * would risk returning an OddsPapi run instead.
+     */
+    @Transactional(readOnly = true)
+    public Optional<IngestionRunResponse> findLastRun() {
+        return ingestionRunRepository.findTopByProviderOrderByFinishedAtDesc(DataSource.THEODDSAPI)
+                .map(IngestionRunResponse::from);
     }
 
     private CompetitionBreakdownEntry ingestCompetition(Competition competition, Map<Long, Match> touchedMatches) {
@@ -178,22 +196,20 @@ public class TheOddsApiIngestionService {
         Match match = null;
 
         for (TheOddsApiBookmakerDto bookmakerDto : event.bookmakers()) {
-            // Of The Odds API's ~21 regional/retail bookmaker keys (confirmed against 5 real La
-            // Liga events, 2026-08-25), 6 currently resolve here by literal external_key match:
-            // pinnacle, betsson, coolbet, marathonbet, matchbook, williamhill. This is NOT a
-            // curated list - the Bookmaker table still carries ~230 orphaned rows left over from
-            // the old daily full-catalog sync (removed from the code, never cleaned from the data -
-            // see ReferenceDataSyncService's class comment), so these 6 matches are accidental
-            // overlap with The Odds API's own naming, not a deliberate decision that these 6 are
-            // safe/wanted sources. bet365/unibet/betano/betplay do NOT appear in this same sample
-            // (unibet shows up there as unibet_fr/unibet_nl/unibet_se - country-suffixed keys that
-            // don't match our bare "unibet" row). Before pruning the Bookmaker table down to an
-            // intentional set, explicitly decide which of these 6 (if any) should stay wired to
-            // this ingestion path - don't assume "it's just pinnacle" (that was true when the
-            // table only held the fixed OddsPapi list) or that today's 6 are already the right set.
+            // Explicit curated list now (2026-08-26), same pattern as IngestionService's
+            // targetBookmakers for OddsPapi - see the comment on theoddsapi-ingestion.bookmakers
+            // in application.yml for how this list was derived (confirmed clone pairs and
+            // exchanges excluded, against real price data). Checked before even querying the DB,
+            // so a bookmaker.key() the Bookmaker table happens to have a row for (that ~230-row
+            // orphaned catalog - see ReferenceDataSyncService) but that ISN'T on this list still
+            // gets skipped here.
+            if (!targetBookmakers.contains(bookmakerDto.key())) {
+                continue;
+            }
+
             Bookmaker bookmaker = bookmakerRepository.findByExternalKey(bookmakerDto.key()).orElse(null);
             if (bookmaker == null) {
-                continue;
+                continue; // on the curated list but no Bookmaker row yet - skip defensively
             }
 
             List<TheOddsApiMarketDto> markets = bookmakerDto.markets();

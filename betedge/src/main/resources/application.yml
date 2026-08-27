@@ -65,16 +65,30 @@ odds-ingestion:
 # calls/cycle. TheOddsApiIngestionScheduler now runs at 3 fixed local times/day (7am, 10am, 2pm
 # America/Bogota - see its @Scheduled crons) instead of a 12h fixed interval: 5 calls x 3
 # cycles/day x 30 days = 450/month. This scheduler doesn't own the whole 500/month cap either -
-# see hot-refresh below, which shares it: 450 + hot-refresh's own 100/month = 550/month scheduled
-# - THIS IS OVER the real 500/month cap by 50/month, unlike before this rework (was 460/month,
-# 40/month under). Going from 2 to 3 cycles/day cost more budget than dropping Brasileirão saved.
-# Left as specified (2026-08-23) rather than silently changed - resolve the overage (drop a cron
-# time, lower hot-refresh's monthly-budget, or accept it against a real 500/month check) before
-# turning scheduling-enabled on for real. Recompute BOTH theoddsapi schedulers together if either
-# cron schedule, the tracked-league count, or hot-refresh's budget changes - don't budget this
-# block in isolation. scheduling-enabled defaults to false (unlike odds-ingestion's true): this
-# pipeline hasn't run in production yet, so it stays off until turned on deliberately.
+# see hot-refresh below, which shares it: 450 + hot-refresh's own 50/month (reduced from 100 on
+# 2026-08-23, see hot-refresh's own comment) = exactly 500/month, right at the real cap with no
+# margin left. Recompute BOTH theoddsapi schedulers together if either cron schedule, the
+# tracked-league count, or hot-refresh's budget changes - don't budget this block in isolation.
+# scheduling-enabled defaults to false (unlike odds-ingestion's true): this pipeline hasn't run
+# in production yet, so it stays off until turned on deliberately.
+#
+# bookmakers: curated 2026-08-26 against a real sample of 40 events across all 5 tracked leagues
+# (8/league, regions=eu&markets=h2h - same params TheOddsApiClient.fetchOdds uses). Of the ~26
+# raw bookmaker.key() values The Odds API returns under those params, 2 confirmed price-identical
+# clone pairs were found with NO name relationship (100% identical h2h price across every
+# comparable event, no exceptions): betanysports/betonlineag and betsson/nordicbet - one side of
+# each pair is excluded (betanysports, nordicbet) to avoid double-counting the same real feed in
+# the value-bet consensus. Also excludes 2 exchanges (matchbook, betfair_ex_eu) - an exchange's
+# price comes from peer-to-peer order matching, not one bookmaker's own margin, so it isn't
+# comparable the same way in the consensus (may revisit deliberately later, not an oversight).
+# unibet_fr/unibet_nl/unibet_se and winamax_de/winamax_fr look like the same brand duplicated by
+# country but were kept: their prices genuinely diverge in most sampled events (unibet_fr never
+# matched nl or se once in 39 events; unibet_nl vs unibet_se was a mixed ~50/50 identical/diverging
+# pattern, not clean enough to call a confirmed clone either way) - so none of the 5 were dropped
+# on name-similarity alone. See the 2026-08-26 investigation for the full price-comparison
+# evidence before changing this list.
 theoddsapi-ingestion:
+  bookmakers: ${THEODDSAPI_INGESTION_BOOKMAKERS:betclic_fr,betonlineag,betsson,codere_it,coolbet,everygame,gtbets,leovegas_se,marathonbet,mybookieag,onexbet,pinnacle,pmu_fr,sport888,suprabets,tipico_de,unibet_fr,unibet_nl,unibet_se,williamhill,winamax_de,winamax_fr}
   scheduling-enabled: ${THEODDSAPI_INGESTION_SCHEDULING_ENABLED:false}
 
 # Tighter-cycle refresh for matches about to kick off - odds move fastest in the final hour.
