@@ -87,8 +87,18 @@ odds-ingestion:
 # pattern, not clean enough to call a confirmed clone either way) - so none of the 5 were dropped
 # on name-similarity alone. See the 2026-08-26 investigation for the full price-comparison
 # evidence before changing this list.
+#
+# pinnacle removed 2026-08-28: it's also in odds-ingestion.bookmakers above (OddsPapi), and having
+# both pipelines feed the same Bookmaker row under two different data_source values caused a real
+# clustering bug in OddsHistoryChart - each source's own price was stable, but the two interleaved
+# reports looked like constant back-and-forth changes (see OddsDeduplicationService's incident
+# writeup and the 2026-08-28 retroactive cleanups). Deduplication was made source-aware as a
+# defense in depth, but removing the actual dual-source overlap here is the structural fix -
+# Pinnacle now comes exclusively from OddsPapi. Bundesliga is the only tracked league that loses a
+# bookmaker with no OddsPapi replacement (OddsPapi doesn't cover it) - confirmed still well above
+# the 3-bookmaker consensus minimum after the drop, see the 2026-08-28 verification.
 theoddsapi-ingestion:
-  bookmakers: ${THEODDSAPI_INGESTION_BOOKMAKERS:betclic_fr,betonlineag,betsson,codere_it,coolbet,everygame,gtbets,leovegas_se,marathonbet,mybookieag,onexbet,pinnacle,pmu_fr,sport888,suprabets,tipico_de,unibet_fr,unibet_nl,unibet_se,williamhill,winamax_de,winamax_fr}
+  bookmakers: ${THEODDSAPI_INGESTION_BOOKMAKERS:betclic_fr,betonlineag,betsson,codere_it,coolbet,everygame,gtbets,leovegas_se,marathonbet,mybookieag,onexbet,pmu_fr,sport888,suprabets,tipico_de,unibet_fr,unibet_nl,unibet_se,williamhill,winamax_de,winamax_fr}
   scheduling-enabled: ${THEODDSAPI_INGESTION_SCHEDULING_ENABLED:false}
 
 # Tighter-cycle refresh for matches about to kick off - odds move fastest in the final hour.

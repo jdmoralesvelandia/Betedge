@@ -83,18 +83,23 @@ class TheOddsApiIngestionServiceTest {
     // asserted here depends on their normal per-call transaction boundaries.
     @Test
     @Transactional
-    void reconcilesAgainstOddsPapiMatchCreatesNewMatchWhenUnmatchedAndLatestOddsIgnoresSource() {
+    void reconcilesAgainstOddsPapiMatchCreatesNewMatchWhenUnmatchedAndNeverIngestsPinnacleFromThisSource() {
         // --- Arrange: OddsPapi returns one fixture (Arsenal vs Chelsea, tournament 17 = Premier
         // League per V11's seed data), with a full-time-moneyline Pinnacle price for all 3 selections.
         when(oddsPapiClient.fetchOddsByTournaments(anyList(), anyString()))
-                .thenReturn(List.of(oddsPapiFixture()));
+                .thenReturn(List.of(oddsPapiFixture(new BigDecimal("1.80"))));
         when(oddsPapiClient.fetchParticipantNames(anyInt()))
                 .thenReturn(Map.of("101", "Arsenal", "102", "Chelsea"));
 
         // The Odds API (soccer_epl) returns two events: the SAME real fixture (Arsenal vs Chelsea,
         // same kickoff) that OddsPapi already ingested, plus a second fixture OddsPapi never saw.
         // Every other tracked league's sportKey is left unstubbed (Mockito returns List.of()), so
-        // this test only ever deals with Premier League data.
+        // this test only ever deals with Premier League data. Each event carries TWO bookmakers -
+        // "pinnacle" and "gtbets" - deliberately: pinnacle is a real bookmaker.key() The Odds API
+        // genuinely returns (it was in theoddsapi-ingestion.bookmakers until 2026-08-28), so this
+        // proves the curated-list filter excludes it specifically, not just because the event
+        // happened to carry no ingestible bookmaker at all - gtbets (still curated) is the control
+        // that proves normal ingestion/reconciliation is otherwise unaffected.
         when(theOddsApiClient.fetchOdds(PREMIER_LEAGUE_THEODDSAPI_SPORT_KEY))
                 .thenReturn(List.of(reconcilingEvent(), newEvent()));
 
@@ -104,7 +109,7 @@ class TheOddsApiIngestionServiceTest {
 
         Match oddsPapiMatch = matchRepository.findByExternalId(RECONCILING_FIXTURE_ID).orElseThrow();
         List<Odds> afterOddsPapiOnly = oddsRepository.findByMatchIdOrderByTimestampAsc(oddsPapiMatch.getId());
-        assertThat(afterOddsPapiOnly).hasSize(3); // home/away/draw, all dataSource=ODDSPAPI
+        assertThat(afterOddsPapiOnly).hasSize(3); // home/away/draw, all dataSource=ODDSPAPI, bookmaker=pinnacle
 
         // --- Act 2: The Odds API ingests, independently.
         theOddsApiIngestionService.runIngestion(TriggeredBy.MANUAL);
@@ -116,55 +121,69 @@ class TheOddsApiIngestionServiceTest {
         assertThat(matchRepository.findByExternalId(RECONCILING_FIXTURE_ID)).map(Match::getId).contains(oddsPapiMatch.getId());
 
         List<Odds> afterBothSources = oddsRepository.findByMatchIdOrderByTimestampAsc(oddsPapiMatch.getId());
-        assertThat(afterBothSources).hasSize(6); // 3 more: home/away/draw, dataSource=THEODDSAPI
+        // 3 more, not 6: gtbets's home/away/draw only - pinnacle's own 3 from this event are
+        // filtered out entirely by targetBookmakers before a Bookmaker lookup even happens (see
+        // TheOddsApiIngestionService.ingestEvent).
+        assertThat(afterBothSources).hasSize(6);
 
-        // Case: two Pinnacle rows (one per source) coexist for the same match+selection.
+        // Case: pinnacle stays exclusively OddsPapi's - never a second, THEODDSAPI-sourced row for
+        // the same triad. This is the actual structural fix (2026-08-28): pinnacle was removed
+        // from theoddsapi-ingestion.bookmakers specifically so this can no longer happen - see
+        // application.yml's own comment and OddsDeduplicationService's incident writeup for why a
+        // source-aware dedup check alone wasn't considered enough.
         List<Odds> pinnacleHomeRows = afterBothSources.stream()
                 .filter(o -> o.getBookmaker().getExternalKey().equals("pinnacle"))
                 .filter(o -> o.getSelection().equals("home"))
                 .toList();
-        assertThat(pinnacleHomeRows).hasSize(2);
-        assertThat(pinnacleHomeRows).extracting(Odds::getDataSource)
-                .containsExactlyInAnyOrder(DataSource.ODDSPAPI, DataSource.THEODDSAPI);
+        assertThat(pinnacleHomeRows).hasSize(1);
+        assertThat(pinnacleHomeRows.get(0).getDataSource()).isEqualTo(DataSource.ODDSPAPI);
 
-        // Case: "latest wins" picks TheOddsApi's row here, since it was inserted second (later
-        // timestamp) - not because of anything specific to which source it is.
-        Odds latestPinnacleHome = latestPinnacleHome(oddsPapiMatch.getId());
-        assertThat(latestPinnacleHome.getDataSource()).isEqualTo(DataSource.THEODDSAPI);
+        // Case: gtbets (still curated) ingests normally from The Odds API - the exclusion above
+        // is specific to pinnacle, not a side effect of some broader breakage.
+        List<Odds> gtbetsHomeRows = afterBothSources.stream()
+                .filter(o -> o.getBookmaker().getExternalKey().equals("gtbets"))
+                .filter(o -> o.getSelection().equals("home"))
+                .toList();
+        assertThat(gtbetsHomeRows).hasSize(1);
+        assertThat(gtbetsHomeRows.get(0).getDataSource()).isEqualTo(DataSource.THEODDSAPI);
 
         // Case: no candidate found for the second event - a new Match is created with the
-        // "theoddsapi:" prefix, distinct from OddsPapi's own fixtureId scheme.
+        // "theoddsapi:" prefix, distinct from OddsPapi's own fixtureId scheme. (Its own pinnacle
+        // bookmaker is excluded the same way; only its gtbets odds actually get ingested.)
         Optional<Match> newMatch = matchRepository.findByExternalId(NEW_EVENT_EXTERNAL_ID);
         assertThat(newMatch).isPresent();
         assertThat(newMatch.get().getHomeTeam()).isEqualTo("Manchester United");
         assertThat(newMatch.get().getAwayTeam()).isEqualTo("Liverpool");
         assertThat(matchRepository.findAll()).hasSize(2); // exactly these two, no stray duplicates
 
-        // --- Act 3: OddsPapi ingests again (its own later poll) - proves "latest wins" really
-        // tracks the timestamp, not the source: now the newer row is ODDSPAPI again.
+        // --- Act 3: OddsPapi ingests again (its own later poll), this time with a genuinely
+        // different price (1.80 -> 1.75) - proves the source-aware dedup fix still lets a real
+        // price change through (it's a defense in depth, not what's carrying this test's main
+        // point anymore - see OddsDeduplicationServiceTest for that logic in isolation). A
+        // same-price re-poll here (still "1.80") would correctly insert nothing.
+        when(oddsPapiClient.fetchOddsByTournaments(anyList(), anyString()))
+                .thenReturn(List.of(oddsPapiFixture(new BigDecimal("1.75"))));
         ingestionService.runIngestion(TriggeredBy.MANUAL);
 
-        Odds latestPinnacleHomeAfterSecondOddsPapiRun = latestPinnacleHome(oddsPapiMatch.getId());
-        assertThat(latestPinnacleHomeAfterSecondOddsPapiRun.getDataSource()).isEqualTo(DataSource.ODDSPAPI);
-    }
-
-    private Odds latestPinnacleHome(Long matchId) {
-        return oddsRepository.findLatestOddsByMatch(matchId).stream()
+        List<Odds> pinnacleHomeRowsAfterThirdRun = oddsRepository.findByMatchIdOrderByTimestampAsc(oddsPapiMatch.getId()).stream()
                 .filter(o -> o.getBookmaker().getExternalKey().equals("pinnacle"))
                 .filter(o -> o.getSelection().equals("home"))
-                .findFirst()
-                .orElseThrow();
+                .toList();
+        assertThat(pinnacleHomeRowsAfterThirdRun).hasSize(2); // the genuine change, correctly inserted
+        assertThat(pinnacleHomeRowsAfterThirdRun).allMatch(o -> o.getDataSource() == DataSource.ODDSPAPI);
+        assertThat(pinnacleHomeRowsAfterThirdRun.get(1).getOddValue()).isEqualByComparingTo("1.75");
     }
 
-    private static OddsPapiFixtureDto oddsPapiFixture() {
+    private static OddsPapiFixtureDto oddsPapiFixture(BigDecimal homePrice) {
         // One OddsPapiOutcomeDto per selection, keyed by OddsPapi's own outcome id (101/102/103) -
         // IngestionService.OUTCOME_KEY_TO_SELECTION reads the selection from this outer map key,
         // not from OddsPapiPlayerPriceDto.bookmakerOutcomeId (that field is bookmaker-internal and
         // only ever used as-is for Odds.selection on the OLD, pre-fix code path). bookmakerOutcomeId
         // is set to a realistic opaque value here precisely to make clear it's NOT what selection
-        // comes from.
+        // comes from. homePrice is parameterized so callers can simulate a genuine OddsPapi-side
+        // price move across two calls (see Act 3's own comment above).
         OddsPapiOutcomeDto homeOutcome = new OddsPapiOutcomeDto(
-                Map.of("p1", new OddsPapiPlayerPriceDto(true, "48601", new BigDecimal("1.80"))));
+                Map.of("p1", new OddsPapiPlayerPriceDto(true, "48601", homePrice)));
         OddsPapiOutcomeDto drawOutcome = new OddsPapiOutcomeDto(
                 Map.of("p1", new OddsPapiPlayerPriceDto(true, "48602", new BigDecimal("3.60"))));
         OddsPapiOutcomeDto awayOutcome = new OddsPapiOutcomeDto(
@@ -194,8 +213,13 @@ class TheOddsApiIngestionServiceTest {
                 new TheOddsApiOutcomeDto(awayTeam, new BigDecimal("4.10")),
                 new TheOddsApiOutcomeDto("Draw", new BigDecimal("3.55")));
         TheOddsApiMarketDto h2h = new TheOddsApiMarketDto("h2h", commenceTime, outcomes);
+        // Two bookmakers per event on purpose - see this test method's own comment on why both are
+        // needed: pinnacle (a real bookmaker.key() The Odds API still returns, but no longer on
+        // theoddsapi-ingestion.bookmakers since 2026-08-28) proves the exclusion; gtbets (still
+        // curated) is the control proving normal ingestion is otherwise unaffected.
         TheOddsApiBookmakerDto pinnacle = new TheOddsApiBookmakerDto("pinnacle", "Pinnacle", commenceTime, List.of(h2h));
+        TheOddsApiBookmakerDto gtbets = new TheOddsApiBookmakerDto("gtbets", "GTbets", commenceTime, List.of(h2h));
         return new TheOddsApiEventDto(
-                id, PREMIER_LEAGUE_THEODDSAPI_SPORT_KEY, "EPL", commenceTime, homeTeam, awayTeam, List.of(pinnacle));
+                id, PREMIER_LEAGUE_THEODDSAPI_SPORT_KEY, "EPL", commenceTime, homeTeam, awayTeam, List.of(pinnacle, gtbets));
     }
 }

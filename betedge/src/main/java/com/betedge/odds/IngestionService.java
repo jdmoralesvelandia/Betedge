@@ -54,6 +54,7 @@ public class IngestionService {
     private final MatchRepository matchRepository;
     private final BookmakerRepository bookmakerRepository;
     private final OddsRepository oddsRepository;
+    private final OddsDeduplicationService oddsDeduplicationService;
     private final IngestionRunRepository ingestionRunRepository;
     private final OddsPapiClient oddsPapiClient;
     private final ReferenceDataSyncService referenceDataSyncService;
@@ -213,6 +214,12 @@ public class IngestionService {
                         continue;
                     }
                     for (OddsPapiPlayerPriceDto price : outcome.players().values()) {
+                        // Skip the insert entirely when the price hasn't moved since the last known
+                        // snapshot for this exact (match, bookmaker, selection) - see
+                        // OddsDeduplicationService's own Javadoc for why.
+                        if (oddsDeduplicationService.isUnchanged(match, bookmaker, selection, DataSource.ODDSPAPI, price.price())) {
+                            continue;
+                        }
                         Odds odds = new Odds();
                         odds.setMatch(match);
                         odds.setBookmaker(bookmaker);

@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Layout } from '../components/Layout'
 import { EmptyState } from '../components/EmptyState'
+import { ChevronIcon } from '../components/ChevronIcon'
 import { OddsHistoryChart } from '../components/OddsHistoryChart'
+import { SingleBookmakerChart } from '../components/SingleBookmakerChart'
 import { ValueBetCard } from '../components/ValueBetCard'
 import { SurebetCard } from '../components/SurebetCard'
 import { useAuth } from '../auth/AuthContext'
@@ -23,6 +25,11 @@ export function MatchDetailPage() {
   const [surebets, setSurebets] = useState<SurebetDto[]>([])
   const [selection, setSelection] = useState<(typeof SELECTIONS)[number]>('home')
   const [error, setError] = useState<string | null>(null)
+  // Shared by SingleBookmakerChart (always visible) and OddsHistoryChart (behind "Comparación de
+  // casas" below) so switching the time window in either one keeps both in sync - lifted here
+  // rather than each tracking its own copy.
+  const [showFullHistory, setShowFullHistory] = useState(false)
+  const [showComparison, setShowComparison] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -107,7 +114,31 @@ export function MatchDetailPage() {
             ))}
           </div>
         </div>
-        <OddsHistoryChart entries={filteredOdds} />
+        <SingleBookmakerChart
+          entries={filteredOdds}
+          showFullHistory={showFullHistory}
+          onToggleFullHistory={() => setShowFullHistory((prev) => !prev)}
+        />
+
+        <button
+          type="button"
+          onClick={() => setShowComparison((prev) => !prev)}
+          aria-expanded={showComparison}
+          className="mt-6 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-ink-faint transition-colors hover:text-ink-soft"
+        >
+          <ChevronIcon open={showComparison} />
+          Comparación de casas
+        </button>
+
+        {showComparison && (
+          <div className="mt-3">
+            <OddsHistoryChart
+              entries={filteredOdds}
+              showFullHistory={showFullHistory}
+              onToggleFullHistory={() => setShowFullHistory((prev) => !prev)}
+            />
+          </div>
+        )}
       </section>
 
       <section className="mb-8">
