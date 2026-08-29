@@ -26,12 +26,18 @@ export const endpoints = {
 
   matches: (
     fetcher: Fetcher,
-    filters?: { competitionId?: number; search?: string; finishedWithinDays?: number },
+    filters?: {
+      competitionId?: number
+      search?: string
+      finishedWithinDays?: number
+      finishedToday?: boolean
+    },
   ) => {
     const params = new URLSearchParams()
     if (filters?.competitionId != null) params.set('competitionId', String(filters.competitionId))
     if (filters?.search) params.set('search', filters.search)
     if (filters?.finishedWithinDays != null) params.set('finishedWithinDays', String(filters.finishedWithinDays))
+    if (filters?.finishedToday != null) params.set('finishedToday', String(filters.finishedToday))
     const query = params.toString()
     return fetcher<MatchDto[]>(`/matches${query ? `?${query}` : ''}`)
   },

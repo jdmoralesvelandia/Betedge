@@ -10,20 +10,33 @@ import { formatDateTime } from '../lib/format'
 
 const SEARCH_DEBOUNCE_MS = 300
 
+// FINISHED was previously bg-surface-2 text-ink-faint - same solid grey fill as SCHEDULED's
+// bg-surface-2 text-ink-soft, differing only by text shade. Given a "already happened, less
+// relevant now" pill deserves to read as visually receded, not just a paler copy of "upcoming" -
+// so it drops the fill entirely (border-only) instead of getting yet another solid color.
+// The border itself is --color-critical (the design system's one red, already reserved for real
+// errors/alerts - see the role="alert" banners throughout the app) at 40% opacity, same "existing
+// token, dimmed" technique already used elsewhere (e.g. border-series-1/40 in LoginPage) rather
+// than a one-off red invented just for this badge - full-strength critical would read as an error
+// state right next to this exact page's own error banner, which is exactly what dimming it avoids.
 const STATUS_BADGE: Record<MatchStatus, { label: string; className: string }> = {
   SCHEDULED: { label: 'Próximo', className: 'bg-surface-2 text-ink-soft' },
   LIVE: { label: 'En vivo', className: 'bg-warning-soft text-warning' },
-  FINISHED: { label: 'Finalizado', className: 'bg-surface-2 text-ink-faint' },
+  FINISHED: { label: 'Finalizado', className: 'border border-critical/40 text-ink-faint' },
 }
 
-// Mirrors MatchQueryService's own defaults/sentinel on the backend - see its Javadoc.
-const DEFAULT_FINISHED_WITHIN_DAYS = 7
-const SHOW_ALL_FINISHED_SENTINEL = 0
+// Mirrors MatchQueryService's own sentinel on the backend - see its Javadoc.
+const SHOW_ALL_FINISHED_SENTINEL = '0'
+// Distinct from the rolling-day options below: "today" is a fixed America/Bogota calendar-day
+// cutoff (see MatchQueryService.findAll's Javadoc for finishedToday), not "last N days". This is
+// the page's own default on load - not one of MatchQueryService's DEFAULT_FINISHED_WITHIN_DAYS.
+const TODAY_FILTER_VALUE = 'today'
 
 const FINISHED_WINDOW_OPTIONS = [
-  { value: 7, label: 'Últimos 7 días' },
-  { value: 30, label: 'Últimos 30 días' },
-  { value: 90, label: 'Últimos 3 meses' },
+  { value: TODAY_FILTER_VALUE, label: 'Hoy' },
+  { value: '7', label: 'Últimos 7 días' },
+  { value: '30', label: 'Últimos 30 días' },
+  { value: '90', label: 'Últimos 3 meses' },
   { value: SHOW_ALL_FINISHED_SENTINEL, label: 'Todos' },
 ] as const
 
@@ -35,11 +48,11 @@ export function MatchesPage() {
   const [competitionId, setCompetitionId] = useState<number | null>(null)
   const [searchInput, setSearchInput] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [finishedWithinDays, setFinishedWithinDays] = useState<number>(DEFAULT_FINISHED_WITHIN_DAYS)
+  const [finishedFilter, setFinishedFilter] = useState<string>(TODAY_FILTER_VALUE)
   const [error, setError] = useState<string | null>(null)
 
   const hasActiveFilters = competitionId !== null || debouncedSearch.trim() !== ''
-  const isShowingAllFinished = finishedWithinDays === SHOW_ALL_FINISHED_SENTINEL
+  const isShowingAllFinished = finishedFilter === SHOW_ALL_FINISHED_SENTINEL
 
   useEffect(() => {
     let cancelled = false
@@ -65,11 +78,13 @@ export function MatchesPage() {
 
   useEffect(() => {
     let cancelled = false
+    const isToday = finishedFilter === TODAY_FILTER_VALUE
     endpoints
       .matches(apiFetch, {
         competitionId: competitionId ?? undefined,
         search: debouncedSearch.trim() || undefined,
-        finishedWithinDays,
+        finishedWithinDays: isToday ? undefined : Number(finishedFilter),
+        finishedToday: isToday ? true : undefined,
       })
       .then((data) => {
         if (!cancelled) setMatches(data)
@@ -81,7 +96,7 @@ export function MatchesPage() {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [competitionId, debouncedSearch, finishedWithinDays])
+  }, [competitionId, debouncedSearch, finishedFilter])
 
   return (
     <Layout>
@@ -120,8 +135,8 @@ export function MatchesPage() {
         <label className="flex items-center gap-2 text-sm text-ink-soft">
           <span className="whitespace-nowrap">Finalizados:</span>
           <select
-            value={finishedWithinDays}
-            onChange={(e) => setFinishedWithinDays(Number(e.target.value))}
+            value={finishedFilter}
+            onChange={(e) => setFinishedFilter(e.target.value)}
             aria-label="Finalizados"
             className="rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-ink-soft"
           >

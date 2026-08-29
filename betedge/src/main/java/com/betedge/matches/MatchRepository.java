@@ -36,6 +36,16 @@ public interface MatchRepository extends JpaRepository<Match, Long> {
      * apply cleanly to a temporal parameter's IS NULL branch - so instead of passing null to mean
      * "no age limit", the caller passes a sentinel Instant far enough in the past that no real
      * match can ever be older than it, making the filter a no-op without ever binding a null.
+     *
+     * Ordering is by status priority first (FINISHED, then LIVE, then SCHEDULED), independent of
+     * whatever finishedCutoff narrowed the FINISHED group down to - within each group:
+     *   - FINISHED: startTime DESC (most recently finished first)
+     *   - LIVE: startTime ASC (been playing longest first)
+     *   - SCHEDULED: startTime ASC (kicking off soonest first)
+     * The 2nd/3rd ORDER BY expressions each only produce a non-null value for the status they
+     * apply to (NULL otherwise) - harmless, since the 1st expression already fully partitions rows
+     * into three contiguous, non-overlapping blocks by status before either tiebreaker is ever
+     * consulted.
      */
     @Query("""
             SELECT m FROM Match m
@@ -45,7 +55,14 @@ public interface MatchRepository extends JpaRepository<Match, Long> {
                  OR LOWER(m.awayTeam) LIKE LOWER(CONCAT('%', CAST(:search AS string), '%')))
             AND (m.status <> com.betedge.matches.MatchStatus.FINISHED
                  OR m.startTime >= :finishedCutoff)
-            ORDER BY m.startTime ASC
+            ORDER BY
+                CASE m.status
+                    WHEN com.betedge.matches.MatchStatus.FINISHED THEN 0
+                    WHEN com.betedge.matches.MatchStatus.LIVE THEN 1
+                    ELSE 2
+                END ASC,
+                CASE WHEN m.status = com.betedge.matches.MatchStatus.FINISHED THEN m.startTime END DESC,
+                CASE WHEN m.status <> com.betedge.matches.MatchStatus.FINISHED THEN m.startTime END ASC
             """)
     List<Match> findAllFiltered(
             @Param("competitionId") Long competitionId,
