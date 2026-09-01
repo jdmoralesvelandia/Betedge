@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, XAxis, YAxis } from 'recharts'
 import type { OddsHistoryEntryDto } from '../api/types'
-import { bookmakerLabel } from '../lib/format'
-import { hasHistoryBeyondRecentWindow, windowSeries } from '../lib/oddsWindow'
+import { bookmakerLabel, formatDateTime } from '../lib/format'
+import { dataSourceBySlug, hasHistoryBeyondRecentWindow, windowSeries, withTrailingConfirmation } from '../lib/oddsWindow'
 import {
   CHART_DOT_STYLE,
   decimalPlacesForRange,
@@ -29,16 +29,22 @@ const LINE_COLOR = 'var(--color-series-1)'
  * shared modules (lib/oddsChartFormat.ts, OddsChartTooltip.tsx) rather than duplicating that logic.
  *
  * showFullHistory/onToggleFullHistory are controlled from MatchDetailPage, shared with
- * OddsHistoryChart - see that component's own comment on why.
+ * OddsHistoryChart - see that component's own comment on why. lastOddsPapiRunAt/
+ * lastTheOddsApiRunAt (ms since epoch, or null if that provider has never completed a run) come
+ * from the same place - see withTrailingConfirmation's own Javadoc for what they're for.
  */
 export function SingleBookmakerChart({
   entries,
   showFullHistory,
   onToggleFullHistory,
+  lastOddsPapiRunAt,
+  lastTheOddsApiRunAt,
 }: {
   entries: OddsHistoryEntryDto[]
   showFullHistory: boolean
   onToggleFullHistory: () => void
+  lastOddsPapiRunAt: number | null
+  lastTheOddsApiRunAt: number | null
 }) {
   // Every bookmaker with data for this selection, full history, ranked by current best odd
   // descending - same ranking rule as OddsHistoryChart's, just never sliced to MAX_SERIES here.
@@ -58,6 +64,8 @@ export function SingleBookmakerChart({
       return latestB - latestA
     })
   }, [entries])
+
+  const dataSourceForSlug = useMemo(() => dataSourceBySlug(entries), [entries])
 
   // Rough precision just for the dropdown's own price labels - each option shows one bookmaker's
   // own single latest value, so this only needs to be reasonable across the whole list, not tied
@@ -106,9 +114,45 @@ export function SingleBookmakerChart({
     [selectedPoints, showFullHistory],
   )
 
+  // The last successful run of THIS bookmaker's own source - see withTrailingConfirmation's own
+  // Javadoc in lib/oddsWindow.ts for what this is used for.
+  const lastRunAtForSelected = useMemo(() => {
+    const source = selectedSlug ? dataSourceForSlug.get(selectedSlug) : undefined
+    if (source === 'ODDSPAPI') return lastOddsPapiRunAt
+    if (source === 'THEODDSAPI') return lastTheOddsApiRunAt
+    return null
+  }, [selectedSlug, dataSourceForSlug, lastOddsPapiRunAt, lastTheOddsApiRunAt])
+
+  // Real points plus, when applicable, one synthetic trailing point extending the line to the
+  // last successful check of this bookmaker's own source - fed to <LineChart data={...}> below
+  // AND to flatPoints (tagged isSynthetic there, so it's hoverable but never rendered as a real
+  // price - see that useMemo's own comment). decimalPlaces, xAxisTickFormatter's non-empty branch,
+  // yAxisDomain and hasOnlyOnePointEver above still read windowedPoints/selectedPoints instead -
+  // see withTrailingConfirmation's own Javadoc for why the synthetic point can never be mistaken
+  // for a real registered price in any of those.
+  const chartPoints = useMemo(
+    () => withTrailingConfirmation(windowedPoints, lastRunAtForSelected),
+    [windowedPoints, lastRunAtForSelected],
+  )
+  const hasTrailingConfirmation = chartPoints.length > windowedPoints.length
+
+  // Built from chartPoints (real + the trailing synthetic point, if any) - not windowedPoints -
+  // so the synthetic point is hoverable too, tagged isSynthetic so CursorTooltip renders it as
+  // "confirmed unchanged" instead of a real price. It's always the LAST element of chartPoints
+  // when present (withTrailingConfirmation only ever appends one, at the end).
   const flatPoints = useMemo(
-    (): FlatPoint[] => (selectedSlug ? windowedPoints.map((p) => ({ slug: selectedSlug, x: p.x, y: p.y })) : []),
-    [windowedPoints, selectedSlug],
+    (): FlatPoint[] =>
+      selectedSlug
+        ? chartPoints.map(
+            (p, i): FlatPoint => ({
+              slug: selectedSlug,
+              x: p.x,
+              y: p.y,
+              isSynthetic: hasTrailingConfirmation && i === chartPoints.length - 1,
+            }),
+          )
+        : [],
+    [chartPoints, selectedSlug, hasTrailingConfirmation],
   )
 
   const colorBySlug = useMemo(
@@ -123,12 +167,15 @@ export function SingleBookmakerChart({
     return decimalPlacesForRange(range)
   }, [windowedPoints])
 
+  // Based on chartPoints (real + synthetic, if any) so the tick format matches the span actually
+  // drawn - a trailing confirmation stretching the line out by a day or more should be able to
+  // switch the axis to a day-aware format same as any other range change would.
   const xAxisTickFormatter = useMemo(() => {
-    if (windowedPoints.length === 0) return xAxisTickFormatterForRange(0)
-    const xs = windowedPoints.map((p) => p.x)
+    if (chartPoints.length === 0) return xAxisTickFormatterForRange(0)
+    const xs = chartPoints.map((p) => p.x)
     const rangeMs = Math.max(...xs) - Math.min(...xs)
     return xAxisTickFormatterForRange(rangeMs)
-  }, [windowedPoints])
+  }, [chartPoints])
 
   if (entries.length === 0 || selectedSlug === null) {
     return <p className="text-sm text-ink-faint">Todavía no hay histórico de cuotas para este resultado.</p>
@@ -165,7 +212,7 @@ export function SingleBookmakerChart({
 
       <div className="h-72 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={windowedPoints} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+          <LineChart data={chartPoints} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
             <CartesianGrid stroke="var(--color-grid)" vertical={false} />
             <XAxis
               dataKey="x"
@@ -196,11 +243,16 @@ export function SingleBookmakerChart({
           </LineChart>
         </ResponsiveContainer>
       </div>
-      {hasOnlyOnePointEver && (
-        <p className="mt-1 text-xs text-ink-faint">
-          Esta casa apenas registró su primer precio - todavía no hay suficiente historial para ver evolución.
-        </p>
-      )}
+      {hasOnlyOnePointEver &&
+        (hasTrailingConfirmation ? (
+          <p className="mt-1 text-xs text-ink-faint">
+            Esta casa está confirmada sin cambios desde {formatDateTime(new Date(selectedPoints[0].x).toISOString())}.
+          </p>
+        ) : (
+          <p className="mt-1 text-xs text-ink-faint">
+            Esta casa apenas registró su primer precio - todavía no hay suficiente historial para ver evolución.
+          </p>
+        ))}
       {!showFullHistory && !hasHiddenHistory && (
         <p className="mt-1 text-xs text-ink-faint">
           Esta casa tiene menos de 72 horas de historial - &ldquo;Ver historial completo&rdquo; no cambiará nada.

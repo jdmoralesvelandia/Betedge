@@ -1,6 +1,5 @@
 package com.betedge.odds;
 
-import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -22,9 +21,13 @@ public class OddsController {
         return new LastIngestionResponse(ingestionService.getMostRecentOddsTimestamp());
     }
 
-    /** Full odds history for a match (every bookmaker, every snapshot) - for the odds-evolution chart. */
+    /**
+     * Full odds history for a match (every bookmaker, every snapshot) - for the odds-evolution
+     * chart. Also carries each provider's last completed run timestamp, used to visually extend a
+     * series' line to "still confirmed as of then" - see OddsHistoryResponse's own Javadoc.
+     */
     @GetMapping("/history")
-    public List<OddsHistoryEntryDto> history(@RequestParam Long matchId) {
+    public OddsHistoryResponse history(@RequestParam Long matchId) {
         return oddsQueryService.findHistoryByMatch(matchId);
     }
 }

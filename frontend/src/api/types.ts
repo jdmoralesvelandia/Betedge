@@ -70,11 +70,26 @@ export interface CompetitionDto {
   name: string
 }
 
+export type DataSource = 'ODDSPAPI' | 'THEODDSAPI'
+
 export interface OddsHistoryEntryDto {
   bookmakerSlug: string
   selection: string
   oddValue: number
   timestamp: string
+  dataSource: DataSource
+}
+
+/**
+ * lastOddsPapiRunAt/lastTheOddsApiRunAt are each that provider's last COMPLETED ingestion run -
+ * used to visually extend a series' line to "still confirmed as of then" instead of leaving it
+ * dangling at its own last real point (see lib/oddsWindow.ts's withTrailingConfirmation). Either
+ * can be null if that provider has never completed a run yet.
+ */
+export interface OddsHistoryResponseDto {
+  entries: OddsHistoryEntryDto[]
+  lastOddsPapiRunAt: string | null
+  lastTheOddsApiRunAt: string | null
 }
 
 export type TriggeredBy = 'SCHEDULED' | 'MANUAL'

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, XAxis, YAxis } from 'recharts'
 import type { OddsHistoryEntryDto } from '../api/types'
 import { bookmakerLabel } from '../lib/format'
-import { hasHistoryBeyondRecentWindow, windowSeries } from '../lib/oddsWindow'
+import { dataSourceBySlug, hasHistoryBeyondRecentWindow, windowSeries, withTrailingConfirmation } from '../lib/oddsWindow'
 import {
   CHART_DOT_STYLE,
   decimalPlacesForRange,
@@ -121,10 +121,14 @@ export function OddsHistoryChart({
   entries,
   showFullHistory,
   onToggleFullHistory,
+  lastOddsPapiRunAt,
+  lastTheOddsApiRunAt,
 }: {
   entries: OddsHistoryEntryDto[]
   showFullHistory: boolean
   onToggleFullHistory: () => void
+  lastOddsPapiRunAt: number | null
+  lastTheOddsApiRunAt: number | null
 }) {
   /**
    * Every bookmaker with at least one point for this selection, full (unwindowed) history, ranked
@@ -153,6 +157,8 @@ export function OddsHistoryChart({
       return latestB - latestA
     })
   }, [entries])
+
+  const dataSourceForSlug = useMemo(() => dataSourceBySlug(entries), [entries])
 
   const autoTopSlugs = useMemo(
     () => new Set(rankedBookmakers.slice(0, DEFAULT_SERIES_COUNT).map(([slug]) => slug)),
@@ -231,11 +237,39 @@ export function OddsHistoryChart({
   // THAT bookmaker's OWN latest timestamp (windowSeries, shared with SingleBookmakerChart - see
   // its own Javadoc in lib/oddsWindow.ts for the incident a single group-wide cutoff caused: a
   // rarely-updated bookmaker's own history silently narrowed by another bookmaker updating more
-  // often). Only used to build mergedData/decimalPlaces/flatPoints below, never to decide which
-  // <Line>s exist (that's bookmakerSeries, kept stable - see its own comment).
+  // often). Feeds decimalPlaces/flatPoints/visibleValues below directly, and mergedData
+  // indirectly via chartSeries - never decides which <Line>s exist (that's bookmakerSeries, kept
+  // stable - see its own comment).
   const windowedSeries = useMemo(
     () => bookmakerSeries.map(([slug, points]) => [slug, windowSeries(points, showFullHistory)] as const),
     [bookmakerSeries, showFullHistory],
+  )
+
+  // Each visible bookmaker's own source's last successful run - see withTrailingConfirmation's
+  // own Javadoc in lib/oddsWindow.ts for what this is used for.
+  const lastRunAtBySlug = useMemo(() => {
+    const map = new Map<string, number | null>()
+    for (const [slug] of bookmakerSeries) {
+      const source = dataSourceForSlug.get(slug)
+      map.set(slug, source === 'ODDSPAPI' ? lastOddsPapiRunAt : source === 'THEODDSAPI' ? lastTheOddsApiRunAt : null)
+    }
+    return map
+  }, [bookmakerSeries, dataSourceForSlug, lastOddsPapiRunAt, lastTheOddsApiRunAt])
+
+  // windowedSeries plus, per series, one synthetic trailing point when that series' own source
+  // ran again after its last real point - feeds mergedData (the dataset actually handed to
+  // <LineChart data={...}>) AND flatPoints (so the synthetic point is hoverable, tagged
+  // isSynthetic - see its own comment below). decimalPlaces/visibleValues stay built from
+  // windowedSeries (real points only) instead - a synthetic point's value is always a duplicate of
+  // its own series' last real one, so including it there could never change a range/precision
+  // calculation anyway; keeping them off chartSeries is about keeping the DEPENDENCY obviously
+  // real-only, not about avoiding a different numeric result.
+  const chartSeries = useMemo(
+    () =>
+      windowedSeries.map(
+        ([slug, points]) => [slug, withTrailingConfirmation(points, lastRunAtBySlug.get(slug) ?? null)] as const,
+      ),
+    [windowedSeries, lastRunAtBySlug],
   )
 
   /**
@@ -258,10 +292,14 @@ export function OddsHistoryChart({
    * The hover tooltip itself no longer even goes through Recharts' Tooltip machinery at all -
    * see CursorTooltip/findNearestPoint in OddsChartTooltip.tsx - but the merged dataset is still
    * what keeps the <Line>s themselves (their stepAfter rendering, connectNulls) correct.
+   *
+   * Built from chartSeries (real points + each series' own synthetic trailing point, if any), not
+   * windowedSeries - the whole point of that synthetic point is to extend the drawn line, and
+   * mergedData is what's actually handed to <LineChart data={...}> below.
    */
   const mergedData = useMemo(() => {
     const rowsByTimestamp = new Map<number, MergedRow>()
-    for (const [slug, points] of windowedSeries) {
+    for (const [slug, points] of chartSeries) {
       for (const point of points) {
         let existing = rowsByTimestamp.get(point.x)
         if (!existing) {
@@ -272,11 +310,35 @@ export function OddsHistoryChart({
       }
     }
     return [...rowsByTimestamp.values()].sort((a, b) => a.x - b.x)
-  }, [windowedSeries])
+  }, [chartSeries])
 
-  const flatPoints = useMemo(
-    () => windowedSeries.flatMap(([slug, points]) => points.map((p): FlatPoint => ({ slug, x: p.x, y: p.y }))),
+  // How many of chartSeries' points are real, per slug - so the LAST point of a series can be
+  // tagged isSynthetic below exactly when withTrailingConfirmation actually appended one (it only
+  // ever appends at most one, at the end).
+  const windowedLengthBySlug = useMemo(
+    () => new Map(windowedSeries.map(([slug, points]) => [slug, points.length])),
     [windowedSeries],
+  )
+
+  // Built from chartSeries (real + each series' own trailing synthetic point, if any) - not
+  // windowedSeries - so a synthetic point is hoverable too, tagged isSynthetic so CursorTooltip
+  // renders it as "confirmed unchanged" instead of a real price. findNearestPoint's own grouping
+  // (points from different slugs landing at ~the same pixel spot) needs no special-casing for
+  // this - it groups by pixel distance regardless of isSynthetic, so a synthetic point coinciding
+  // with another bookmaker's real one still groups correctly, each row keeping its own flag.
+  const flatPoints = useMemo(
+    () =>
+      chartSeries.flatMap(([slug, points]) =>
+        points.map(
+          (p, i): FlatPoint => ({
+            slug,
+            x: p.x,
+            y: p.y,
+            isSynthetic: i === points.length - 1 && points.length > (windowedLengthBySlug.get(slug) ?? 0),
+          }),
+        ),
+      ),
+    [chartSeries, windowedLengthBySlug],
   )
 
   // Every value actually drawn right now (post-window, post-selection) - a bookmaker not currently

@@ -13,6 +13,15 @@ export interface FlatPoint {
   slug: string
   x: number
   y: number
+  /**
+   * True for the one synthetic trailing point a series can get (see withTrailingConfirmation in
+   * lib/oddsWindow.ts) - same value as the series' own last real point, at its source's last
+   * successful run instead of a real registration. Required (not optional) so every call site has
+   * to say explicitly which kind of point this is, rather than leaving it to an implicit
+   * "undefined means real" default - CursorTooltip below reads it to render that row as "confirmed
+   * unchanged" instead of a real price.
+   */
+  isSynthetic: boolean
 }
 
 /** How close (in real screen pixels) the cursor has to be to a point before it counts as "hovering" it. */
@@ -156,7 +165,11 @@ export function CursorTooltip({
     setCursor({ x: local.x, y: local.y })
   }
 
-  const BOX_WIDTH = 190
+  // Wider when the group includes a synthetic point - "8.15 (confirmado sin cambios)" needs more
+  // room than a plain value ever does, and this only ever widens the box for the hover that
+  // actually needs it, never the common all-real case.
+  const hasSyntheticRow = nearest ? nearest.points.some((p) => p.isSynthetic) : false
+  const BOX_WIDTH = hasSyntheticRow ? 250 : 190
   const ROW_HEIGHT = 16
   const TOP_PADDING = 10
   const TIMESTAMP_ROW_HEIGHT = 18
@@ -197,7 +210,11 @@ export function CursorTooltip({
             const rowBaseline = boxY + TOP_PADDING + index * ROW_HEIGHT + 10
             return (
               <g key={point.slug}>
-                <circle cx={boxX + 14} cy={rowBaseline - 4} r={4} fill={rowColor} />
+                {point.isSynthetic ? (
+                  <circle cx={boxX + 14} cy={rowBaseline - 4} r={4} fill="none" stroke={rowColor} strokeWidth={1.5} />
+                ) : (
+                  <circle cx={boxX + 14} cy={rowBaseline - 4} r={4} fill={rowColor} />
+                )}
                 <text x={boxX + 24} y={rowBaseline} fontSize={11} fontWeight={600} fill="var(--color-ink)">
                   {bookmakerLabel(point.slug)}
                 </text>
@@ -206,10 +223,11 @@ export function CursorTooltip({
                   y={rowBaseline}
                   fontSize={11}
                   fontWeight={600}
-                  fill="var(--color-ink)"
+                  fill={point.isSynthetic ? 'var(--color-ink-faint)' : 'var(--color-ink)'}
                   textAnchor="end"
                 >
                   {formatOddValue(point.y, decimalPlaces)}
+                  {point.isSynthetic ? ' (confirmado sin cambios)' : ''}
                 </text>
               </g>
             )

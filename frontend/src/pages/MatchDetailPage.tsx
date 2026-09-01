@@ -10,6 +10,7 @@ import { SurebetCard } from '../components/SurebetCard'
 import { useAuth } from '../auth/AuthContext'
 import { endpoints } from '../api/endpoints'
 import type { MatchDto, OddsHistoryEntryDto, SurebetDto, ValueBetDto } from '../api/types'
+import { toEpochMs } from '../lib/oddsWindow'
 import { formatDateTime, selectionLabel } from '../lib/format'
 
 const SELECTIONS = ['home', 'draw', 'away'] as const
@@ -21,6 +22,11 @@ export function MatchDetailPage() {
 
   const [match, setMatch] = useState<MatchDto | null>(null)
   const [odds, setOdds] = useState<OddsHistoryEntryDto[] | null>(null)
+  // Each provider's last completed ingestion run (ms since epoch, converted once here from the
+  // API's ISO strings) - passed down to both charts so they can extend a series' line to "still
+  // confirmed as of then" - see lib/oddsWindow.ts's withTrailingConfirmation.
+  const [lastOddsPapiRunAt, setLastOddsPapiRunAt] = useState<number | null>(null)
+  const [lastTheOddsApiRunAt, setLastTheOddsApiRunAt] = useState<number | null>(null)
   const [valueBets, setValueBets] = useState<ValueBetDto[]>([])
   const [surebets, setSurebets] = useState<SurebetDto[]>([])
   const [selection, setSelection] = useState<(typeof SELECTIONS)[number]>('home')
@@ -44,7 +50,9 @@ export function MatchDetailPage() {
         ])
         if (cancelled) return
         setMatch(matchDto)
-        setOdds(oddsHistory)
+        setOdds(oddsHistory.entries)
+        setLastOddsPapiRunAt(toEpochMs(oddsHistory.lastOddsPapiRunAt))
+        setLastTheOddsApiRunAt(toEpochMs(oddsHistory.lastTheOddsApiRunAt))
         setValueBets(vbActive)
         setSurebets(sbActive)
       } catch {
@@ -118,6 +126,8 @@ export function MatchDetailPage() {
           entries={filteredOdds}
           showFullHistory={showFullHistory}
           onToggleFullHistory={() => setShowFullHistory((prev) => !prev)}
+          lastOddsPapiRunAt={lastOddsPapiRunAt}
+          lastTheOddsApiRunAt={lastTheOddsApiRunAt}
         />
 
         <button
@@ -136,6 +146,8 @@ export function MatchDetailPage() {
               entries={filteredOdds}
               showFullHistory={showFullHistory}
               onToggleFullHistory={() => setShowFullHistory((prev) => !prev)}
+              lastOddsPapiRunAt={lastOddsPapiRunAt}
+              lastTheOddsApiRunAt={lastTheOddsApiRunAt}
             />
           </div>
         )}

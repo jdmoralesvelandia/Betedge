@@ -7,10 +7,12 @@ public record OddsHistoryEntryDto(
         String bookmakerSlug,
         String selection,
         BigDecimal oddValue,
-        Instant timestamp) {
+        Instant timestamp,
+        DataSource dataSource) {
 
     static OddsHistoryEntryDto from(Odds odds) {
         return new OddsHistoryEntryDto(
-                odds.getBookmaker().getExternalKey(), odds.getSelection(), odds.getOddValue(), odds.getTimestamp());
+                odds.getBookmaker().getExternalKey(), odds.getSelection(), odds.getOddValue(), odds.getTimestamp(),
+                odds.getDataSource());
     }
 }

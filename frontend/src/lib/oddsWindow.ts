@@ -1,3 +1,5 @@
+import type { DataSource, OddsHistoryEntryDto } from '../api/types'
+
 /**
  * Shared "recent window" rule used by both OddsHistoryChart and OddsMovementsTable so the two stay
  * in sync under one toggle - by default only the last 72h of history is shown, relative to the
@@ -8,6 +10,16 @@
 export const HOUR_MS = 60 * 60 * 1000
 export const DAY_MS = 24 * HOUR_MS
 export const DEFAULT_RECENT_WINDOW_MS = 72 * HOUR_MS
+
+/**
+ * ISO timestamp string -> ms since epoch, passing null through unchanged - for the optional
+ * per-provider run timestamps on OddsHistoryResponseDto (lastOddsPapiRunAt/lastTheOddsApiRunAt),
+ * converted once in MatchDetailPage the same way entries' own timestamps already are everywhere
+ * else in these charts, rather than each chart component re-parsing the ISO string itself.
+ */
+export function toEpochMs(iso: string | null): number | null {
+  return iso === null ? null : new Date(iso).getTime()
+}
 
 /** Most recent of the given timestamps (ms since epoch), or null for an empty list. */
 export function latestOf(timestamps: number[]): number | null {
@@ -64,4 +76,42 @@ export function windowSeries<P extends { x: number }>(points: P[], showFullHisto
     showFullHistory,
   )
   return cutoff === null ? points : points.filter((p) => p.x >= cutoff)
+}
+
+/**
+ * bookmakerSlug -> the one DataSource that ever reports it. Safe to take the first entry seen per
+ * slug: since 2026-08-28 (pinnacle's structural exclusion from theoddsapi-ingestion.bookmakers -
+ * see application.yml's own comment) every curated bookmaker comes from exactly one provider,
+ * never both - there's no longer a real (match, bookmaker) pair straddling two sources.
+ */
+export function dataSourceBySlug(entries: OddsHistoryEntryDto[]): Map<string, DataSource> {
+  const map = new Map<string, DataSource>()
+  for (const entry of entries) {
+    if (!map.has(entry.bookmakerSlug)) map.set(entry.bookmakerSlug, entry.dataSource)
+  }
+  return map
+}
+
+/**
+ * Appends a synthetic trailing point - same y as the series' own last real point, at
+ * lastSuccessfulRunAt - when that provider's last completed run happened AFTER the series' last
+ * real point. Visually extends the line to "still confirmed unchanged as of the last real check",
+ * instead of leaving it dangling at its last update (which reads as "unknown what happened
+ * since", not "confirmed still the same"). No-op (returns `points` itself, unmodified) when
+ * there's nothing to extend from, or the last successful run isn't actually newer.
+ *
+ * The synthetic point is ONLY ever meant for the array literally handed to <LineChart data={...}>
+ * - callers must build every other derived value (tooltip points, decimal-precision/domain
+ * calculations, "how many real points does this series have" checks) from the ORIGINAL points
+ * array, never from this function's return value, so the synthetic point can never be mistaken
+ * for - or counted as - a real registered price.
+ */
+export function withTrailingConfirmation<P extends { x: number }>(
+  points: P[],
+  lastSuccessfulRunAt: number | null,
+): P[] {
+  if (points.length === 0 || lastSuccessfulRunAt === null) return points
+  const lastReal = points[points.length - 1]
+  if (lastSuccessfulRunAt <= lastReal.x) return points
+  return [...points, { ...lastReal, x: lastSuccessfulRunAt }]
 }

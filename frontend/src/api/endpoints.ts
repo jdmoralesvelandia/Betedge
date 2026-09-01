@@ -4,7 +4,7 @@ import type {
   IngestionRunDto,
   LastIngestionResponseDto,
   MatchDto,
-  OddsHistoryEntryDto,
+  OddsHistoryResponseDto,
   SurebetDto,
   ValueBetDto,
 } from './types'
@@ -22,7 +22,7 @@ export const endpoints = {
 
   lastUpdated: (fetcher: Fetcher) => fetcher<LastIngestionResponseDto>('/odds/last-updated'),
   oddsHistory: (fetcher: Fetcher, matchId: number) =>
-    fetcher<OddsHistoryEntryDto[]>(`/odds/history?matchId=${matchId}`),
+    fetcher<OddsHistoryResponseDto>(`/odds/history?matchId=${matchId}`),
 
   matches: (
     fetcher: Fetcher,
