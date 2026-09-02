@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import { Layout } from '../components/Layout'
 import { EmptyState } from '../components/EmptyState'
 import { ChevronIcon } from '../components/ChevronIcon'
@@ -19,6 +19,18 @@ export function MatchDetailPage() {
   const { id } = useParams<{ id: string }>()
   const matchId = Number(id)
   const { apiFetch } = useAuth()
+  const location = useLocation()
+  // Where the user came from (Dashboard with its tab/liga, or Partidos with its own filters) -
+  // carried as router state by whichever card/row linked here (see ValueBetCard/SurebetCard's
+  // fromLocation prop and MatchesPage's own <Link state>). Absent on a direct visit (shared link,
+  // page reload) - falls back to /dashboard below, same as if the origin was the Dashboard itself.
+  const from = (location.state as { from?: string } | null)?.from
+  const backTo = from ?? '/dashboard'
+  // Only Partidos and the Dashboard ever set "from", and always to their own root path - "/matches"
+  // (optionally with query params) for Partidos, "/dashboard" (optionally with query params) for
+  // the Dashboard. No third value is possible: MatchDetailPage's own cards below pass this same
+  // "from" straight through rather than pointing at themselves, so it never becomes "/matches/123".
+  const backLabel = from?.startsWith('/matches') ? '← Volver a partidos' : '← Volver al dashboard'
 
   const [match, setMatch] = useState<MatchDto | null>(null)
   const [odds, setOdds] = useState<OddsHistoryEntryDto[] | null>(null)
@@ -72,6 +84,15 @@ export function MatchDetailPage() {
     [odds, selection],
   )
 
+  // Highest edge first - every active value bet for this match (unlike the Dashboard's own
+  // one-card-per-match summary, this section deliberately shows all of them, one per bookmaker+
+  // selection), sorted client-side since the list is already fully loaded and small; no reason to
+  // push an ORDER BY onto ValueBetRepository.findActiveByMatch's native query for this.
+  const sortedValueBets = useMemo(
+    () => [...valueBets].sort((a, b) => b.edgePercentage - a.edgePercentage),
+    [valueBets],
+  )
+
   if (error) {
     return (
       <Layout>
@@ -92,8 +113,8 @@ export function MatchDetailPage() {
 
   return (
     <Layout>
-      <Link to="/" className="mb-4 inline-block text-sm text-ink-faint hover:text-ink">
-        ← Volver al dashboard
+      <Link to={backTo} className="mb-4 inline-block text-sm text-ink-faint hover:text-ink">
+        {backLabel}
       </Link>
 
       <div className="mb-6">
@@ -165,8 +186,8 @@ export function MatchDetailPage() {
           />
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {valueBets.map((vb) => (
-              <ValueBetCard key={vb.id} valueBet={vb} showDetectedAt />
+            {sortedValueBets.map((vb) => (
+              <ValueBetCard key={vb.id} valueBet={vb} showDetectedAt fromLocation={from} />
             ))}
           </div>
         )}
@@ -185,7 +206,7 @@ export function MatchDetailPage() {
         ) : (
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {surebets.map((sb) => (
-              <SurebetCard key={sb.id} surebet={sb} showDetectedAt />
+              <SurebetCard key={sb.id} surebet={sb} showDetectedAt fromLocation={from} />
             ))}
           </div>
         )}

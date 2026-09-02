@@ -23,6 +23,9 @@ export function Layout({ children }: { children: ReactNode }) {
             </NavLink>
             <nav className="flex items-center gap-1">
               <NavLink to="/" end className={navLinkClass}>
+                Inicio
+              </NavLink>
+              <NavLink to="/dashboard" className={navLinkClass}>
                 Dashboard
               </NavLink>
               <NavLink to="/matches" className={navLinkClass}>

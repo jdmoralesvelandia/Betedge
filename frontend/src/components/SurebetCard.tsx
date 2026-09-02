@@ -8,10 +8,13 @@ import { bookmakerLabel, formatDateTime, formatOdd, formatPercent, selectionLabe
 export function SurebetCard({
   surebet,
   showDetectedAt = false,
+  fromLocation,
 }: {
   surebet: SurebetDto
   /** MatchDetailPage's history section shows when each was detected, over time; everywhere else (e.g. the Dashboard) shows the match's own kickoff date instead. */
   showDetectedAt?: boolean
+  /** See ValueBetCard's own identical prop - same "remember where this card was clicked from" purpose. */
+  fromLocation?: string
 }) {
   const inputId = useId()
   const [amountInput, setAmountInput] = useState('')
@@ -23,7 +26,11 @@ export function SurebetCard({
 
   return (
     <div className="flex flex-col rounded-xl border border-border bg-surface transition-colors hover:border-series-1/60">
-      <Link to={`/matches/${surebet.matchId}`} className="group flex flex-col gap-3 p-4">
+      <Link
+        to={`/matches/${surebet.matchId}`}
+        state={fromLocation ? { from: fromLocation } : undefined}
+        className="group flex flex-col gap-3 p-4"
+      >
         <div className="flex items-center justify-between text-xs text-ink-faint">
           <span className="truncate">{surebet.competitionName}</span>
           <span>{formatDateTime(showDetectedAt ? surebet.detectedAt : surebet.startTime)}</span>

@@ -15,6 +15,22 @@ export function formatDateTime(iso: string): string {
   })
 }
 
+/**
+ * Same shape as formatDateTime plus seconds - for a movements table where two updates from
+ * different bookmakers can land in the same minute and need to stay distinguishable, and where
+ * "hace 2 horas" (formatRelativeToNow) is explicitly the wrong call: a movements log needs the
+ * exact moment, not a moving-target relative label.
+ */
+export function formatDateTimeSeconds(iso: string): string {
+  return new Date(iso).toLocaleString('es-ES', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
 export function formatRelativeToNow(iso: string): string {
   const then = new Date(iso).getTime()
   const diffMs = Date.now() - then

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { Layout } from '../components/Layout'
 import { EmptyState } from '../components/EmptyState'
 import { LastUpdatedBadge } from '../components/LastUpdatedBadge'
@@ -42,14 +42,39 @@ const FINISHED_WINDOW_OPTIONS = [
 
 export function MatchesPage() {
   const { apiFetch } = useAuth()
+  const location = useLocation()
+  // liga/finalizados live in the URL so a "volver" link from a match's detail page can restore
+  // this exact view, not just "Partidos with whatever filters happened to be default" - see
+  // updateCompetitionId/updateFinishedFilter below for how they stay in sync, and
+  // MatchDetailPage's own back-link for the other end of this.
+  const [searchParams, setSearchParams] = useSearchParams()
   const [matches, setMatches] = useState<MatchDto[] | null>(null)
   const [competitions, setCompetitions] = useState<CompetitionDto[]>([])
   const [lastUpdated, setLastUpdated] = useState<string | null>(null)
-  const [competitionId, setCompetitionId] = useState<number | null>(null)
+  const [competitionId, setCompetitionId] = useState<number | null>(() => {
+    const raw = searchParams.get('liga')
+    return raw ? Number(raw) : null
+  })
   const [searchInput, setSearchInput] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [finishedFilter, setFinishedFilter] = useState<string>(TODAY_FILTER_VALUE)
+  const [finishedFilter, setFinishedFilter] = useState<string>(() => searchParams.get('finalizados') ?? TODAY_FILTER_VALUE)
   const [error, setError] = useState<string | null>(null)
+
+  function updateCompetitionId(id: number | null) {
+    setCompetitionId(id)
+    const next = new URLSearchParams(searchParams)
+    if (id === null) next.delete('liga')
+    else next.set('liga', String(id))
+    setSearchParams(next, { replace: true })
+  }
+
+  function updateFinishedFilter(value: string) {
+    setFinishedFilter(value)
+    const next = new URLSearchParams(searchParams)
+    if (value === TODAY_FILTER_VALUE) next.delete('finalizados')
+    else next.set('finalizados', value)
+    setSearchParams(next, { replace: true })
+  }
 
   const hasActiveFilters = competitionId !== null || debouncedSearch.trim() !== ''
   const isShowingAllFinished = finishedFilter === SHOW_ALL_FINISHED_SENTINEL
@@ -113,7 +138,7 @@ export function MatchesPage() {
       <div className="mb-2 flex flex-wrap items-center gap-3">
         <select
           value={competitionId ?? ''}
-          onChange={(e) => setCompetitionId(e.target.value ? Number(e.target.value) : null)}
+          onChange={(e) => updateCompetitionId(e.target.value ? Number(e.target.value) : null)}
           aria-label="Liga"
           className="rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-ink-soft"
         >
@@ -136,7 +161,7 @@ export function MatchesPage() {
           <span className="whitespace-nowrap">Finalizados:</span>
           <select
             value={finishedFilter}
-            onChange={(e) => setFinishedFilter(e.target.value)}
+            onChange={(e) => updateFinishedFilter(e.target.value)}
             aria-label="Finalizados"
             className="rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-ink-soft"
           >
@@ -199,6 +224,7 @@ export function MatchesPage() {
               <Link
                 key={match.id}
                 to={`/matches/${match.id}`}
+                state={{ from: location.pathname + location.search }}
                 className="grid grid-cols-[1fr_2fr_auto_auto_auto] items-center gap-4 border-b border-border px-4 py-3 text-sm transition-colors last:border-0 hover:bg-surface-2"
               >
                 <span className="truncate text-ink-soft">{match.competitionName}</span>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import { Layout } from '../components/Layout'
 import { EmptyState } from '../components/EmptyState'
 import { LastUpdatedBadge } from '../components/LastUpdatedBadge'
@@ -12,15 +13,63 @@ function byStartTimeAscending(a: { startTime: string }, b: { startTime: string }
   return new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
 }
 
+/**
+ * One card per match on the Dashboard, not one per opportunity - keeps only the highest-edge item
+ * for each matchId. A match can legitimately have several active value bets (one per bookmaker+
+ * selection - see ValueBetRepository.findActive's own DISTINCT ON (match_id, selection), which
+ * intentionally allows up to 3 per match, one per selection) or, in principle, several surebets
+ * (SurebetRepository.findActive collapses to one per match already via its own DISTINCT ON
+ * (match_id) - this can never actually trigger for surebets today, but costs nothing to apply
+ * uniformly as a safeguard against that changing later). This is the Dashboard's own summary view;
+ * MatchDetailPage's "Value bets activos" section deliberately shows every one, uncollapsed.
+ */
+function bestPerMatch<T extends { matchId: number }>(items: T[], edgeOf: (item: T) => number): T[] {
+  const bestByMatch = new Map<number, T>()
+  for (const item of items) {
+    const current = bestByMatch.get(item.matchId)
+    if (!current || edgeOf(item) > edgeOf(current)) {
+      bestByMatch.set(item.matchId, item)
+    }
+  }
+  return [...bestByMatch.values()]
+}
+
 const ALL_COMPETITIONS = ''
+type Tab = 'valueBets' | 'surebets'
 
 export function DashboardPage() {
   const { apiFetch } = useAuth()
+  const location = useLocation()
+  // tab/liga live in the URL so a "volver" link from a match's detail page can restore this exact
+  // view (which tab, which league) instead of always landing back on the tab/filter defaults -
+  // see updateActiveTab/updateCompetitionFilter below for how they stay in sync, and
+  // MatchDetailPage's own back-link for the other end of this.
+  const [searchParams, setSearchParams] = useSearchParams()
   const [valueBets, setValueBets] = useState<ValueBetDto[] | null>(null)
   const [surebets, setSurebets] = useState<SurebetDto[] | null>(null)
   const [lastUpdated, setLastUpdated] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [competitionFilter, setCompetitionFilter] = useState<string>(ALL_COMPETITIONS)
+  // Shared between both tabs on purpose - it's the same filter bar visible above either one, not
+  // two independent filters that happen to look alike. Switching tabs never re-fetches anything;
+  // both lists are already loaded, this only ever changes which of the two arrays gets rendered.
+  const [competitionFilter, setCompetitionFilter] = useState<string>(() => searchParams.get('liga') ?? ALL_COMPETITIONS)
+  const [activeTab, setActiveTab] = useState<Tab>(() => (searchParams.get('tab') === 'surebets' ? 'surebets' : 'valueBets'))
+
+  function updateActiveTab(tab: Tab) {
+    setActiveTab(tab)
+    const next = new URLSearchParams(searchParams)
+    if (tab === 'valueBets') next.delete('tab')
+    else next.set('tab', tab)
+    setSearchParams(next, { replace: true })
+  }
+
+  function updateCompetitionFilter(value: string) {
+    setCompetitionFilter(value)
+    const next = new URLSearchParams(searchParams)
+    if (value === ALL_COMPETITIONS) next.delete('liga')
+    else next.set('liga', value)
+    setSearchParams(next, { replace: true })
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -73,6 +122,17 @@ export function DashboardPage() {
       ? sortedSurebets
       : sortedSurebets.filter((sb) => sb.competitionName === competitionFilter)
 
+  // One card per match, highest edge/profit wins - see bestPerMatch's own comment. Always after
+  // the league filter above, never before: collapsing first could hide a match's best opportunity
+  // if it happened to belong to a different league filter than the one currently selected (it
+  // can't, in practice, since all of a match's own value bets/surebets share its one league - but
+  // filter-then-collapse is the correct order regardless, and is also simply what the task asked for).
+  const collapsedValueBets = useMemo(
+    () => bestPerMatch(filteredValueBets, (vb) => vb.edgePercentage),
+    [filteredValueBets],
+  )
+  const collapsedSurebets = useMemo(() => bestPerMatch(filteredSurebets, (sb) => sb.profitPercentage), [filteredSurebets])
+
   return (
     <Layout>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -82,24 +142,6 @@ export function DashboardPage() {
         </div>
         <LastUpdatedBadge timestamp={lastUpdated} />
       </div>
-
-      {!loading && !hasNothing && availableCompetitions.length > 0 && (
-        <div className="mb-6 flex flex-wrap items-center gap-3">
-          <select
-            value={competitionFilter}
-            onChange={(e) => setCompetitionFilter(e.target.value)}
-            aria-label="Liga"
-            className="rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-ink-soft"
-          >
-            <option value={ALL_COMPETITIONS}>Todas las ligas</option>
-            {availableCompetitions.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
 
       {error && (
         <p className="mb-6 rounded-md bg-critical-soft px-3 py-2 text-sm text-critical" role="alert">
@@ -117,38 +159,73 @@ export function DashboardPage() {
         />
       )}
 
-      {!loading && valueBets.length > 0 && (
-        <section className="mb-8">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-ink-faint">
-            Value bets ({filteredValueBets.length})
-          </h2>
-          {filteredValueBets.length === 0 ? (
-            <p className="text-sm text-ink-faint">No hay value bets activos para esta liga ahora mismo.</p>
-          ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {filteredValueBets.map((vb) => (
-                <ValueBetCard key={vb.id} valueBet={vb} />
-              ))}
+      {!loading && !hasNothing && (
+        <>
+          <div className="mb-6 flex flex-wrap items-center gap-3">
+            <div className="flex gap-1 rounded-md bg-surface-2 p-1">
+              <button
+                type="button"
+                onClick={() => updateActiveTab('valueBets')}
+                className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                  activeTab === 'valueBets' ? 'bg-series-1 text-white' : 'text-ink-soft hover:text-ink'
+                }`}
+              >
+                Value Bets ({collapsedValueBets.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => updateActiveTab('surebets')}
+                className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                  activeTab === 'surebets' ? 'bg-series-1 text-white' : 'text-ink-soft hover:text-ink'
+                }`}
+              >
+                Surebets ({collapsedSurebets.length})
+              </button>
             </div>
-          )}
-        </section>
-      )}
 
-      {!loading && surebets.length > 0 && (
-        <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-ink-faint">
-            Surebets ({filteredSurebets.length})
-          </h2>
-          {filteredSurebets.length === 0 ? (
-            <p className="text-sm text-ink-faint">No hay surebets activos para esta liga ahora mismo.</p>
+            {availableCompetitions.length > 0 && (
+              <select
+                value={competitionFilter}
+                onChange={(e) => updateCompetitionFilter(e.target.value)}
+                aria-label="Liga"
+                className="rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-ink-soft"
+              >
+                <option value={ALL_COMPETITIONS}>Todas las ligas</option>
+                {availableCompetitions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {activeTab === 'valueBets' ? (
+            <section>
+              {collapsedValueBets.length === 0 ? (
+                <p className="text-sm text-ink-faint">No hay value bets activos para esta liga ahora mismo.</p>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {collapsedValueBets.map((vb) => (
+                    <ValueBetCard key={vb.id} valueBet={vb} fromLocation={location.pathname + location.search} />
+                  ))}
+                </div>
+              )}
+            </section>
           ) : (
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {filteredSurebets.map((sb) => (
-                <SurebetCard key={sb.id} surebet={sb} />
-              ))}
-            </div>
+            <section>
+              {collapsedSurebets.length === 0 ? (
+                <p className="text-sm text-ink-faint">No hay surebets activos para esta liga ahora mismo.</p>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  {collapsedSurebets.map((sb) => (
+                    <SurebetCard key={sb.id} surebet={sb} fromLocation={location.pathname + location.search} />
+                  ))}
+                </div>
+              )}
+            </section>
           )}
-        </section>
+        </>
       )}
     </Layout>
   )

@@ -8,10 +8,21 @@ import { bookmakerLabel, formatDateTime, formatOdd, formatPercent, selectionLabe
 export function ValueBetCard({
   valueBet,
   showDetectedAt = false,
+  fromLocation,
 }: {
   valueBet: ValueBetDto
   /** MatchDetailPage's history section shows when each was detected, over time; everywhere else (e.g. the Dashboard) shows the match's own kickoff date instead. */
   showDetectedAt?: boolean
+  /**
+   * The path + search to remember as this match's origin (e.g. "/dashboard?tab=surebets&liga=La+Liga")
+   * - carried as router state on the match-detail link so its own "volver" can come straight back
+   * here, filters and all, instead of always landing on some fixed default. Dashboard/MatchesPage
+   * pass their own current location; MatchDetailPage's own card usages pass through whatever
+   * "from" they themselves received, so clicking one of these cards from within a match's own page
+   * doesn't clobber the original breadcrumb. Optional - omit (or pass undefined) when there's
+   * nothing meaningful to remember, e.g. no incoming "from" at all.
+   */
+  fromLocation?: string
 }) {
   const odd = 1 / valueBet.impliedProbability
   const inputId = useId()
@@ -25,7 +36,11 @@ export function ValueBetCard({
 
   return (
     <div className="flex flex-col rounded-xl border border-border bg-surface transition-colors hover:border-series-1/60">
-      <Link to={`/matches/${valueBet.matchId}`} className="group flex flex-col gap-3 p-4">
+      <Link
+        to={`/matches/${valueBet.matchId}`}
+        state={fromLocation ? { from: fromLocation } : undefined}
+        className="group flex flex-col gap-3 p-4"
+      >
         <div className="flex items-center justify-between text-xs text-ink-faint">
           <span className="truncate">{valueBet.competitionName}</span>
           <span>{formatDateTime(showDetectedAt ? valueBet.detectedAt : valueBet.startTime)}</span>
