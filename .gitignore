@@ -27,3 +27,8 @@ Thumbs.db
 
 # Local dev-tool config (permissions, launch config) - not project source.
 .claude/
+
+# Local-only context for Claude Code sessions - auto-loaded at the start of every session same
+# as .claude/ above, but never committed: it documents non-obvious decisions/incidents for
+# future sessions, not project source anyone else needs to build/run this.
+CLAUDE.md
