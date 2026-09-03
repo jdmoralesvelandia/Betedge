@@ -27,12 +27,18 @@ public class User {
     @Column(nullable = false, unique = true)
     private String email;
 
-    @Column(name = "password_hash", nullable = false)
+    /** Null for a GOOGLE-provider account - it never has (or needs) a password of its own. */
+    @Column(name = "password_hash")
     private String passwordHash;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Role role;
+
+    /** PASSWORD (the retired register flow, and both seeded accounts) or GOOGLE - see AuthProvider's own Javadoc. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "auth_provider", nullable = false)
+    private AuthProvider authProvider;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();

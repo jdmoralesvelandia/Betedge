@@ -15,6 +15,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * The public email+password register flow that used to live here (see git history, removed
+ * 2026-09-02) is retired: Google Sign-In is now the only path for a genuinely new account.
+ * {@link #login}/{@link #refresh}/{@link #logout}/{@link #bootstrapAdmin} are all unchanged - the
+ * only account-creation path left is {@link #loginWithGoogle}'s own find-or-create.
+ */
 @Service
 @RequiredArgsConstructor
 public class AuthService {
@@ -26,6 +32,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final JwtService jwtService;
+    private final GoogleIdTokenVerification googleIdTokenVerification;
     private final SecureRandom secureRandom = new SecureRandom();
 
     @Value("${jwt.refresh-expiration-ms}")
@@ -33,20 +40,6 @@ public class AuthService {
 
     @Value("${admin.bootstrap-secret}")
     private String adminBootstrapSecret;
-
-    @Transactional
-    public UserResponse register(RegisterRequest request) {
-        if (userRepository.findByEmail(request.email()).isPresent()) {
-            throw new EmailAlreadyInUseException();
-        }
-
-        User user = new User();
-        user.setEmail(request.email());
-        user.setPasswordHash(passwordEncoder.encode(request.password()));
-        user.setRole(Role.USER);
-
-        return UserResponse.from(userRepository.save(user));
-    }
 
     @Transactional
     public TokenPair login(LoginRequest request) {
@@ -57,6 +50,61 @@ public class AuthService {
                 .orElseThrow(() -> new BadCredentialsException("Invalid email or password"));
 
         return issueTokens(user);
+    }
+
+    /**
+     * Verifies the raw Google ID token (signature, audience, expiration - all via
+     * {@link GoogleIdTokenVerification}, backed by Google's own library) and requires
+     * {@code email_verified} on top of that - either check failing throws
+     * {@link InvalidGoogleTokenException} (401), never partially proceeding on an unverified or
+     * unverifiable identity.
+     *
+     * <p>Find-or-create by the token's OWN verified email, never a claimed one:
+     * <ul>
+     *   <li>No existing user -&gt; created fresh with {@code authProvider=GOOGLE},
+     *       {@code passwordHash=null}, {@code role=USER}.
+     *   <li>Existing user with {@code authProvider=GOOGLE} -&gt; reused as-is (a returning
+     *       Google user).
+     *   <li>Existing user with {@code authProvider=PASSWORD} -&gt; refused with
+     *       {@link GoogleAccountConflictException} (409), NEVER silently linked - an attacker
+     *       controlling a Google account for someone else's already-registered email must never
+     *       be able to ride into that existing account just by proving they own that email's
+     *       Google identity. In practice today this can only ever be demo@betedge.com or
+     *       admin@betedge.com, since the password register flow that could create more
+     *       PASSWORD accounts no longer exists.
+     * </ul>
+     *
+     * Ends by calling the SAME {@link #issueTokens} every other login path uses - a Google-issued
+     * session is byte-for-byte indistinguishable downstream (JWT, refresh cookie, JwtAuthenticationFilter)
+     * from a password-issued one.
+     */
+    @Transactional
+    public TokenPair loginWithGoogle(String idToken) {
+        GoogleIdentity identity = googleIdTokenVerification.verify(idToken)
+                .filter(GoogleIdentity::emailVerified)
+                .orElseThrow(InvalidGoogleTokenException::new);
+
+        User user = userRepository.findByEmail(identity.email())
+                .map(existing -> requireGoogleProvider(existing))
+                .orElseGet(() -> createGoogleUser(identity.email()));
+
+        return issueTokens(user);
+    }
+
+    private static User requireGoogleProvider(User existing) {
+        if (existing.getAuthProvider() != AuthProvider.GOOGLE) {
+            throw new GoogleAccountConflictException();
+        }
+        return existing;
+    }
+
+    private User createGoogleUser(String email) {
+        User user = new User();
+        user.setEmail(email);
+        user.setPasswordHash(null);
+        user.setRole(Role.USER);
+        user.setAuthProvider(AuthProvider.GOOGLE);
+        return userRepository.save(user);
     }
 
     @Transactional
@@ -96,6 +144,7 @@ public class AuthService {
         admin.setEmail(request.email());
         admin.setPasswordHash(passwordEncoder.encode(request.password()));
         admin.setRole(Role.ADMIN);
+        admin.setAuthProvider(AuthProvider.PASSWORD);
 
         return UserResponse.from(userRepository.save(admin));
     }

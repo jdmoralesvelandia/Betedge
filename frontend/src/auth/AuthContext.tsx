@@ -17,7 +17,8 @@ interface AuthContextValue {
   /** Set when the initial silent refresh couldn't complete at all (e.g. timed out) - distinct from "not logged in". */
   initError: string | null
   login: (email: string, password: string) => Promise<void>
-  register: (email: string, password: string) => Promise<void>
+  /** Sends a verified Google ID token (raw JWT string) to POST /auth/google - see LoginPage's own Google button integration. */
+  loginWithGoogle: (idToken: string) => Promise<void>
   logout: () => Promise<void>
   /** Authenticated fetch: attaches the access token and retries once through /auth/refresh on 401. */
   apiFetch: <T>(path: string, options?: RequestOptions) => Promise<T>
@@ -124,9 +125,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [setSession],
   )
 
-  const register = useCallback(async (email: string, password: string) => {
-    await rawRequest('/auth/register', null, { method: 'POST', body: { email, password } })
-  }, [])
+  const loginWithGoogle = useCallback(
+    async (idToken: string) => {
+      const dto = await rawRequest<AuthResponseDto>('/auth/google', null, {
+        method: 'POST',
+        body: { idToken },
+      })
+      setSession(dto)
+    },
+    [setSession],
+  )
 
   const logout = useCallback(async () => {
     try {
@@ -138,7 +146,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearSession, navigate])
 
   return (
-    <AuthContext.Provider value={{ user, initializing, initError, login, register, logout, apiFetch }}>
+    <AuthContext.Provider value={{ user, initializing, initError, login, loginWithGoogle, logout, apiFetch }}>
       {children}
     </AuthContext.Provider>
   )

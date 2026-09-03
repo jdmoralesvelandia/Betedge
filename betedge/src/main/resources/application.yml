@@ -22,6 +22,14 @@ jwt:
 admin:
   bootstrap-secret: ${ADMIN_BOOTSTRAP_SECRET}
 
+# Google Sign-In (2026-09-02). The OAuth client id is NOT a secret - Google's own docs say it's
+# safe to ship in client-side code - so it's fine as a literal default here, no .env entry
+# required. GoogleIdTokenVerifierAdapter uses this as the required `aud` claim: a token issued
+# for any other client id is rejected, not just any token signed by Google.
+google:
+  oauth:
+    client-id: ${GOOGLE_OAUTH_CLIENT_ID:848697196247-cls6qjq919e5b82tjsvs3vjtnm4lgl10.apps.googleusercontent.com}
+
 cors:
   allowed-origin: ${CORS_ALLOWED_ORIGIN:http://localhost:5173}
 

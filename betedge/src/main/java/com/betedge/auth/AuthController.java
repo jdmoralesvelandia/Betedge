@@ -21,15 +21,21 @@ public class AuthController {
     private final AuthService authService;
     private final RefreshTokenCookieFactory refreshTokenCookieFactory;
 
-    @PostMapping("/register")
-    @ResponseStatus(HttpStatus.CREATED)
-    public UserResponse register(@Valid @RequestBody RegisterRequest request) {
-        return authService.register(request);
-    }
-
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
         return withRefreshCookie(authService.login(request));
+    }
+
+    /**
+     * Google Sign-In - the only path left for a genuinely new account (the public
+     * email+password register endpoint was retired 2026-09-02, see git history). Public, but
+     * "public" only means anyone can call it, not that it trusts anything unverified: idToken is
+     * the raw Google-issued JWT, cryptographically verified server-side before any User is ever
+     * looked up or created - see AuthService.loginWithGoogle's own Javadoc.
+     */
+    @PostMapping("/google")
+    public ResponseEntity<AuthResponse> google(@Valid @RequestBody GoogleAuthRequest request) {
+        return withRefreshCookie(authService.loginWithGoogle(request.idToken()));
     }
 
     @PostMapping("/refresh")
