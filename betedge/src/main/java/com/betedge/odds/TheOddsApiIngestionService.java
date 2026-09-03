@@ -7,6 +7,7 @@ import com.betedge.matches.MatchRepository;
 import com.betedge.matches.MatchStatus;
 import com.betedge.valuebets.SurebetCalculationService;
 import com.betedge.valuebets.ValueBetCalculationService;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -82,6 +83,8 @@ public class TheOddsApiIngestionService {
                 .collect(Collectors.toMap(
                         c -> c.getExternalKeys().get(Competition.THEODDSAPI_KEY), Function.identity()));
 
+        Map<String, Bookmaker> bookmakersByKey = loadBookmakersByKey();
+
         Map<Long, Match> touchedMatches = new LinkedHashMap<>();
         List<CompetitionBreakdownEntry> breakdown = new ArrayList<>();
 
@@ -92,7 +95,7 @@ public class TheOddsApiIngestionService {
             }
             firstCall = false;
 
-            breakdown.add(ingestCompetition(competition, touchedMatches));
+            breakdown.add(ingestCompetition(competition, touchedMatches, bookmakersByKey));
         }
 
         return finishRun(triggeredBy, startedAt, touchedMatches, breakdown);
@@ -107,8 +110,17 @@ public class TheOddsApiIngestionService {
     public IngestionRunResponse refreshCompetition(Competition competition, TriggeredBy triggeredBy) {
         Instant startedAt = Instant.now();
         Map<Long, Match> touchedMatches = new LinkedHashMap<>();
-        CompetitionBreakdownEntry breakdown = ingestCompetition(competition, touchedMatches);
+        CompetitionBreakdownEntry breakdown = ingestCompetition(competition, touchedMatches, loadBookmakersByKey());
         return finishRun(triggeredBy, startedAt, touchedMatches, List.of(breakdown));
+    }
+
+    // Per-run bookmaker cache (2026-09-02): targetBookmakers is small and fixed for the whole run,
+    // so one batched lookup replaces what used to be a findByExternalKey call per bookmaker seen
+    // per event - measured live: 1596 calls/3134ms -> 1 call/3ms for a typical run. See
+    // BookmakerRepository.findByExternalKeyIn.
+    private Map<String, Bookmaker> loadBookmakersByKey() {
+        return bookmakerRepository.findByExternalKeyIn(targetBookmakers).stream()
+                .collect(Collectors.toMap(Bookmaker::getExternalKey, Function.identity()));
     }
 
     /**
@@ -123,7 +135,8 @@ public class TheOddsApiIngestionService {
                 .map(IngestionRunResponse::from);
     }
 
-    private CompetitionBreakdownEntry ingestCompetition(Competition competition, Map<Long, Match> touchedMatches) {
+    private CompetitionBreakdownEntry ingestCompetition(
+            Competition competition, Map<Long, Match> touchedMatches, Map<String, Bookmaker> bookmakersByKey) {
         String sportKey = competition.getExternalKeys().get(Competition.THEODDSAPI_KEY);
         Accumulator accumulator = new Accumulator();
 
@@ -137,7 +150,7 @@ public class TheOddsApiIngestionService {
 
         for (TheOddsApiEventDto event : events) {
             accumulator.eventsReceived++;
-            Match touchedMatch = ingestEvent(event, competition, accumulator);
+            Match touchedMatch = ingestEvent(event, competition, bookmakersByKey, accumulator);
             if (touchedMatch != null) {
                 touchedMatches.put(touchedMatch.getId(), touchedMatch);
             }
@@ -184,7 +197,9 @@ public class TheOddsApiIngestionService {
      * whether ValueBetCalculationService's own isEligible would later exclude the match from
      * calculation. Better to never store it at all.
      */
-    private Match ingestEvent(TheOddsApiEventDto event, Competition competition, Accumulator accumulator) {
+    private Match ingestEvent(
+            TheOddsApiEventDto event, Competition competition, Map<String, Bookmaker> bookmakersByKey,
+            Accumulator accumulator) {
         if (event.bookmakers() == null || event.bookmakers().isEmpty()) {
             return null;
         }
@@ -195,6 +210,11 @@ public class TheOddsApiIngestionService {
         }
 
         Match match = null;
+        // Populated once the match is resolved below, from OddsDeduplicationService.loadLastKnownPrices
+        // (one query for the whole match) - reused for every price checked in this event instead of
+        // one query per price. See OddsDeduplicationService's own Javadoc for the 2026-09-02
+        // batching this replaced (measured live: 4788 calls/9894ms -> 102 calls/362ms for a typical run).
+        Map<String, BigDecimal> lastKnownPrices = null;
 
         for (TheOddsApiBookmakerDto bookmakerDto : event.bookmakers()) {
             // Explicit curated list now (2026-08-26), same pattern as IngestionService's
@@ -208,7 +228,7 @@ public class TheOddsApiIngestionService {
                 continue;
             }
 
-            Bookmaker bookmaker = bookmakerRepository.findByExternalKey(bookmakerDto.key()).orElse(null);
+            Bookmaker bookmaker = bookmakersByKey.get(bookmakerDto.key());
             if (bookmaker == null) {
                 continue; // on the curated list but no Bookmaker row yet - skip defensively
             }
@@ -230,6 +250,7 @@ public class TheOddsApiIngestionService {
                     if (lookup.created()) {
                         accumulator.matchesCreated++;
                     }
+                    lastKnownPrices = oddsDeduplicationService.loadLastKnownPrices(match, DataSource.THEODDSAPI);
                 }
 
                 for (TheOddsApiOutcomeDto outcome : outcomes) {
@@ -243,7 +264,7 @@ public class TheOddsApiIngestionService {
                     // Skip the insert entirely when the price hasn't moved since the last known
                     // snapshot for this exact (match, bookmaker, selection) - see
                     // OddsDeduplicationService's own Javadoc for why.
-                    if (oddsDeduplicationService.isUnchanged(match, bookmaker, selection, DataSource.THEODDSAPI, outcome.price())) {
+                    if (oddsDeduplicationService.isUnchanged(lastKnownPrices, bookmaker, selection, outcome.price())) {
                         continue;
                     }
                     Odds odds = new Odds();

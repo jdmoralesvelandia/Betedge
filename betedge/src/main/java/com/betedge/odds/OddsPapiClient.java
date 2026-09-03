@@ -1,14 +1,32 @@
 package com.betedge.odds;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
+import org.springframework.boot.http.client.HttpClientSettings;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 @Component
 public class OddsPapiClient {
+
+    /**
+     * Neither timeout was ever set before this (2026-09-02) - the RestClient.Builder default
+     * carries none, so a single slow OddsPapi response could block a whole ingestion run
+     * indefinitely with no way out. Values aren't a measured minimum (unlike CALL_DELAY_MS in
+     * IngestionService, which IS one) - just a generous ceiling: connect fails fast (5s) since a
+     * TCP handshake to a reachable host normally completes in well under 1s, while read allows a
+     * genuinely slow-but-alive response (25s) before giving up. A timeout here surfaces as a
+     * RestClientException (SocketTimeoutException wrapped in ResourceAccessException, still a
+     * RestClientException) - already caught per-call by IngestionService.fetchFixturesSafely
+     * without aborting the rest of the run, so this fits the existing failure-handling design
+     * without changing it.
+     */
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration READ_TIMEOUT = Duration.ofSeconds(25);
 
     private final RestClient restClient;
     private final String apiKey;
@@ -17,7 +35,13 @@ public class OddsPapiClient {
             RestClient.Builder restClientBuilder,
             @Value("${oddspapi.base-url}") String baseUrl,
             @Value("${oddspapi.key}") String apiKey) {
-        this.restClient = restClientBuilder.baseUrl(baseUrl).build();
+        this.restClient = restClientBuilder
+                .baseUrl(baseUrl)
+                .requestFactory(ClientHttpRequestFactoryBuilder.detect()
+                        .build(HttpClientSettings.defaults()
+                                .withConnectTimeout(CONNECT_TIMEOUT)
+                                .withReadTimeout(READ_TIMEOUT)))
+                .build();
         this.apiKey = apiKey;
     }
 

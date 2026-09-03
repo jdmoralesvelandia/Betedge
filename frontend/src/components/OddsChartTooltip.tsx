@@ -35,6 +35,22 @@ export const HOVER_HIT_RADIUS_PX = 25
  */
 export const GROUP_HIT_RADIUS_PX = 4
 
+/**
+ * Extra width (in real screen pixels) added to EACH side of the mouse-tracking hit-rect below,
+ * beyond the plot area's own exact left/right edges - purely about where mousemove events get
+ * captured, NOT about hit-testing distance (HOVER_HIT_RADIUS_PX/findNearestPoint are untouched by
+ * this: a point right at the edge can still only win if the cursor, wherever it lands, ends up
+ * within HOVER_HIT_RADIUS_PX of it - this constant only decides whether the cursor's position gets
+ * tracked at all that far out). Fixes a real dead zone: a point plotted at (or within
+ * HOVER_HIT_RADIUS_PX of) the leftmost/rightmost edge of the plot area is real-world reachable by
+ * the cursor sitting a few pixels outside that edge - the hit-rect used to end exactly at
+ * plotArea.x/x+width, so the cursor's own position was never even tracked there, no matter how
+ * close it was to a real point. Vertical edges (top/bottom) don't get this treatment - the
+ * reported dead zone is specifically at the left/right ends of the plotted time range, not
+ * above/below the price range.
+ */
+const EDGE_HIT_MARGIN_PX = 18
+
 export interface NearestPointGroup {
   /** The single closest point to the cursor - the one that actually qualified this spot as "hovered" (see maxDistance). */
   winner: FlatPoint
@@ -195,7 +211,30 @@ export function CursorTooltip({
     <>
       {nearest && (
         <g pointerEvents="none">
-          <circle cx={nearest.pixelX} cy={nearest.pixelY} r={5} fill="none" stroke={anchorColor} strokeWidth={1.5} />
+          {/* One ring per grouped point (not just the winner) - projected here via xScale/yScale
+              rather than adding pixel coordinates to findNearestPoint's own return shape, so the
+              distance/grouping algorithm itself stays untouched. Several coincide close enough in
+              practice (same real ingestion cycle) that their rings can visually overlap almost
+              completely - that's correct, not redundant: it's the same reason the tooltip already
+              lists each of them as its own row instead of collapsing to one. Each ring uses that
+              point's own row color, same as its tooltip row's dot, rather than all sharing the
+              winner's color. */}
+          {nearest.points.map((point) => {
+            const px = xScale(point.x)
+            const py = yScale(point.y)
+            if (px == null || py == null) return null
+            return (
+              <circle
+                key={`ring-${point.slug}`}
+                cx={px}
+                cy={py}
+                r={5}
+                fill="none"
+                stroke={colorBySlug.get(point.slug) ?? anchorColor}
+                strokeWidth={1.5}
+              />
+            )
+          })}
           <rect
             x={boxX}
             y={boxY}
@@ -250,11 +289,16 @@ export function CursorTooltip({
           </text>
         </g>
       )}
-      {/* Rendered last so it paints on top and reliably captures the mouse regardless of what's underneath. */}
+      {/* Rendered last so it paints on top and reliably captures the mouse regardless of what's
+          underneath. Widened by EDGE_HIT_MARGIN_PX on the left/right past the plot area's own
+          exact edges - see that constant's own comment for the dead-zone it closes. The distance
+          check inside findNearestPoint (called from cursor, set by handleMouseMove) is completely
+          unchanged - a cursor landing in this extra margin still only matches a point within
+          HOVER_HIT_RADIUS_PX of wherever it actually is. */}
       <rect
-        x={plotArea.x}
+        x={plotArea.x - EDGE_HIT_MARGIN_PX}
         y={plotArea.y}
-        width={plotArea.width}
+        width={plotArea.width + EDGE_HIT_MARGIN_PX * 2}
         height={plotArea.height}
         fill="transparent"
         onMouseMove={handleMouseMove}

@@ -7,6 +7,8 @@ import static org.mockito.Mockito.when;
 import com.betedge.matches.Match;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -15,6 +17,11 @@ import org.junit.jupiter.api.Test;
  * bookmaker_id, and comparing a new price against "the last row regardless of source" made each
  * source's own unchanged price look like a change whenever the OTHER source's row landed in
  * between - reproducing the exact clustered-points bug the deduplication exists to prevent.
+ *
+ * <p>Updated 2026-09-02 for the batched lookup: {@code isUnchanged} no longer queries the DB
+ * itself - it compares against a snapshot from {@code loadLastKnownPrices}, so these tests mock
+ * that batched repository call instead of the old per-triad one. The scenarios and their intent
+ * are unchanged.
  */
 class OddsDeduplicationServiceTest {
 
@@ -25,17 +32,18 @@ class OddsDeduplicationServiceTest {
     @Test
     void treatsOwnSourcesPriceAsUnchangedEvenWhenTheOtherSourceReportedMoreRecently() {
         // Reproduces Liverpool FC vs Nottingham Forest (match 113) exactly: OddsPapi's own last
-        // reading for this triad was 1.552 - unchanged since. In between, The Odds API wrote its
-        // own stable-but-different 1.550 for the SAME (match, bookmaker, selection), so it is the
-        // most recent row overall - but that's irrelevant to whether OddsPapi's own price moved.
+        // reading for this triad was 1.552 - unchanged since. loadLastKnownPrices only ever fetches
+        // ODDSPAPI's own rows (see OddsRepository.findLatestOddsByMatchAndDataSource), so The Odds
+        // API's own stable-but-different 1.550 for the same (match, bookmaker, selection) never
+        // enters the snapshot at all - it's irrelevant to whether OddsPapi's own price moved.
         OddsRepository oddsRepository = mock(OddsRepository.class);
-        when(oddsRepository.findTopByMatchIdAndBookmakerIdAndSelectionAndDataSourceOrderByTimestampDesc(
-                        MATCH.getId(), PINNACLE.getId(), SELECTION, DataSource.ODDSPAPI))
-                .thenReturn(java.util.Optional.of(oddsRow(new BigDecimal("1.5520"), DataSource.ODDSPAPI)));
+        when(oddsRepository.findLatestOddsByMatchAndDataSource(MATCH.getId(), DataSource.ODDSPAPI.name()))
+                .thenReturn(List.of(oddsRow(new BigDecimal("1.5520"), DataSource.ODDSPAPI)));
 
         OddsDeduplicationService service = new OddsDeduplicationService(oddsRepository);
+        Map<String, BigDecimal> lastKnownPrices = service.loadLastKnownPrices(MATCH, DataSource.ODDSPAPI);
 
-        boolean unchanged = service.isUnchanged(MATCH, PINNACLE, SELECTION, DataSource.ODDSPAPI, new BigDecimal("1.5520"));
+        boolean unchanged = service.isUnchanged(lastKnownPrices, PINNACLE, SELECTION, new BigDecimal("1.5520"));
 
         assertThat(unchanged)
                 .as("OddsPapi's own price didn't move - must be treated as unchanged regardless of "
@@ -46,13 +54,13 @@ class OddsDeduplicationServiceTest {
     @Test
     void stillDetectsARealChangeWithinTheSameSource() {
         OddsRepository oddsRepository = mock(OddsRepository.class);
-        when(oddsRepository.findTopByMatchIdAndBookmakerIdAndSelectionAndDataSourceOrderByTimestampDesc(
-                        MATCH.getId(), PINNACLE.getId(), SELECTION, DataSource.ODDSPAPI))
-                .thenReturn(java.util.Optional.of(oddsRow(new BigDecimal("1.5520"), DataSource.ODDSPAPI)));
+        when(oddsRepository.findLatestOddsByMatchAndDataSource(MATCH.getId(), DataSource.ODDSPAPI.name()))
+                .thenReturn(List.of(oddsRow(new BigDecimal("1.5520"), DataSource.ODDSPAPI)));
 
         OddsDeduplicationService service = new OddsDeduplicationService(oddsRepository);
+        Map<String, BigDecimal> lastKnownPrices = service.loadLastKnownPrices(MATCH, DataSource.ODDSPAPI);
 
-        boolean unchanged = service.isUnchanged(MATCH, PINNACLE, SELECTION, DataSource.ODDSPAPI, new BigDecimal("1.5400"));
+        boolean unchanged = service.isUnchanged(lastKnownPrices, PINNACLE, SELECTION, new BigDecimal("1.5400"));
 
         assertThat(unchanged).isFalse();
     }
@@ -60,13 +68,13 @@ class OddsDeduplicationServiceTest {
     @Test
     void treatsFirstEverReadingFromASourceAsChanged() {
         OddsRepository oddsRepository = mock(OddsRepository.class);
-        when(oddsRepository.findTopByMatchIdAndBookmakerIdAndSelectionAndDataSourceOrderByTimestampDesc(
-                        MATCH.getId(), PINNACLE.getId(), SELECTION, DataSource.THEODDSAPI))
-                .thenReturn(java.util.Optional.empty());
+        when(oddsRepository.findLatestOddsByMatchAndDataSource(MATCH.getId(), DataSource.THEODDSAPI.name()))
+                .thenReturn(List.of());
 
         OddsDeduplicationService service = new OddsDeduplicationService(oddsRepository);
+        Map<String, BigDecimal> lastKnownPrices = service.loadLastKnownPrices(MATCH, DataSource.THEODDSAPI);
 
-        boolean unchanged = service.isUnchanged(MATCH, PINNACLE, SELECTION, DataSource.THEODDSAPI, new BigDecimal("1.5500"));
+        boolean unchanged = service.isUnchanged(lastKnownPrices, PINNACLE, SELECTION, new BigDecimal("1.5500"));
 
         assertThat(unchanged).isFalse();
     }

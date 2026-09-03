@@ -2,6 +2,9 @@ package com.betedge.odds;
 
 import com.betedge.matches.Match;
 import java.math.BigDecimal;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -27,9 +30,19 @@ import org.springframework.stereotype.Service;
  * deduplication was built to prevent in the first place - confirmed against real data on Liverpool
  * FC vs Nottingham Forest and ACF Fiorentina vs Frosinone Calcio (match ids 113, 119): six and eight
  * rows respectively, alternating ODDSPAPI/THEODDSAPI, each source's own price provably unchanged
- * every single cycle. The fix: scope "last known price" to the SAME source as the new reading, via
- * {@link OddsRepository#findTopByMatchIdAndBookmakerIdAndSelectionAndDataSourceOrderByTimestampDesc}
- * - each feed is now compared only against its own history, never the other feed's.
+ * every single cycle. The fix: scope "last known price" to the SAME source as the new reading.
+ *
+ * <p><b>Batched lookups (2026-09-02).</b> Originally one DB round-trip per (bookmaker, selection,
+ * price) checked - measured live against real triggers on 2026-09-02: 864 calls / 1183ms for a
+ * 3-bookmaker OddsPapi run, 4788 calls / 9894ms for a 21-bookmaker The Odds API run (there, ~49% of
+ * the run's entire wall-clock time, the single biggest line item in the whole ingestion cycle -
+ * bigger than the HTTP fetch itself). {@link #loadLastKnownPrices} now fetches every (bookmaker,
+ * selection) latest price for a match+dataSource in ONE query (see
+ * {@link OddsRepository#findLatestOddsByMatchAndDataSource}), and {@link #isUnchanged} compares
+ * against that pre-fetched snapshot in memory instead of hitting Postgres per price. The
+ * "changed/unchanged" criterion itself - same-source comparison, {@link BigDecimal#compareTo} not
+ * {@code equals()} - is unchanged; only the number of round-trips is (one per match instead of one
+ * per price).
  *
  * <p>Shared by both {@link IngestionService} and {@link TheOddsApiIngestionService} so the exact
  * same rule applies to both providers, rather than two copies of the same comparison drifting apart
@@ -42,23 +55,36 @@ public class OddsDeduplicationService {
     private final OddsRepository oddsRepository;
 
     /**
-     * True when the last known price from THIS EXACT source for this (match, bookmaker, selection)
-     * triad already equals newValue - compared via {@link BigDecimal#compareTo}, not
-     * {@code equals()}, since a source can hand back the same real price at a different scale (e.g.
-     * a fresh "1.25" against an already-stored "1.2500") and those must still count as unchanged,
-     * not a false price move. False when there's no prior row from this source at all (first time
-     * this exact quartet is ever seen) or the price genuinely changed for this source - both cases
-     * mean the caller should insert the new row.
-     *
-     * <p>{@code dataSource} is part of the comparison key on purpose - see this class's own Javadoc
-     * for the incident that made that necessary. A caller must always pass the source IT is
-     * currently ingesting from, never infer it from the database.
+     * Fetches the latest known price per (bookmaker, selection) for this match, scoped to
+     * dataSource - one query, meant to be called ONCE per match (right after it's resolved, before
+     * iterating its bookmakers/selections/prices) and reused across every {@link #isUnchanged}
+     * check for that match. {@code dataSource} scoping is on purpose - see this class's own Javadoc
+     * for the incident that made it necessary; a caller must always pass the source IT is currently
+     * ingesting from, never infer it from the database.
      */
-    public boolean isUnchanged(Match match, Bookmaker bookmaker, String selection, DataSource dataSource, BigDecimal newValue) {
-        return oddsRepository
-                .findTopByMatchIdAndBookmakerIdAndSelectionAndDataSourceOrderByTimestampDesc(
-                        match.getId(), bookmaker.getId(), selection, dataSource)
-                .map(previous -> previous.getOddValue().compareTo(newValue) == 0)
-                .orElse(false);
+    public Map<String, BigDecimal> loadLastKnownPrices(Match match, DataSource dataSource) {
+        List<Odds> latest = oddsRepository.findLatestOddsByMatchAndDataSource(match.getId(), dataSource.name());
+        return latest.stream()
+                .collect(Collectors.toMap(
+                        odds -> priceKey(odds.getBookmaker().getId(), odds.getSelection()),
+                        Odds::getOddValue));
+    }
+
+    /**
+     * True when {@code lastKnownPrices} (from {@link #loadLastKnownPrices}, already scoped to this
+     * match's own dataSource) already has this exact price for this (bookmaker, selection) pair -
+     * compared via {@link BigDecimal#compareTo}, not {@code equals()}, since a source can hand back
+     * the same real price at a different scale (e.g. a fresh "1.25" against an already-stored
+     * "1.2500") and those must still count as unchanged, not a false price move. False when there's
+     * no entry for this pair at all (first time this exact quartet is ever seen for this match) or
+     * the price genuinely changed - both cases mean the caller should insert the new row.
+     */
+    public boolean isUnchanged(Map<String, BigDecimal> lastKnownPrices, Bookmaker bookmaker, String selection, BigDecimal newValue) {
+        BigDecimal previous = lastKnownPrices.get(priceKey(bookmaker.getId(), selection));
+        return previous != null && previous.compareTo(newValue) == 0;
+    }
+
+    private static String priceKey(Long bookmakerId, String selection) {
+        return bookmakerId + ":" + selection;
     }
 }

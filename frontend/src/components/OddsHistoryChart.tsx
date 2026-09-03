@@ -417,6 +417,13 @@ export function OddsHistoryChart({
                 stroke={SERIES_COLORS[index % MAX_SERIES]}
                 strokeWidth={2}
                 dot={CHART_DOT_STYLE}
+                // Recharts' own native active-dot mechanism - completely independent of our custom
+                // cursor/findNearestPoint (its own internal state, fed by the same mouse events
+                // bubbling up to its wrapper, but resolved by nearest-X-index, not real 2D
+                // distance) - confirmed live: hovering a shared Unibet NL/SE point rang the wrong
+                // one (1xBet, same X column, unrelated Y). CursorTooltip now draws its own ring per
+                // winner/grouped point instead - see its own comment.
+                activeDot={false}
                 isAnimationActive={false}
               />
             ))}

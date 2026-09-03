@@ -237,6 +237,9 @@ export function SingleBookmakerChart({
               stroke={LINE_COLOR}
               strokeWidth={2}
               dot={CHART_DOT_STYLE}
+              // See OddsHistoryChart's own comment on activeDot={false} - same disconnected-native-
+              // mechanism bug, same fix (CursorTooltip draws its own ring instead).
+              activeDot={false}
               isAnimationActive={false}
             />
             <CursorTooltip points={flatPoints} colorBySlug={colorBySlug} decimalPlaces={decimalPlaces} />

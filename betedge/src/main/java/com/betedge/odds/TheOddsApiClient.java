@@ -1,11 +1,14 @@
 package com.betedge.odds;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
+import org.springframework.boot.http.client.HttpClientSettings;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -21,6 +24,10 @@ public class TheOddsApiClient {
 
     private static final Logger log = LoggerFactory.getLogger(TheOddsApiClient.class);
     private static final String H2H_MARKET_KEY = "h2h";
+
+    /** Same reasoning and same values as OddsPapiClient's own CONNECT_TIMEOUT/READ_TIMEOUT - see there. */
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration READ_TIMEOUT = Duration.ofSeconds(25);
 
     private final RestClient restClient;
     private final String apiKey;
@@ -38,7 +45,13 @@ public class TheOddsApiClient {
             RestClient.Builder restClientBuilder,
             @Value("${theoddsapi.base-url}") String baseUrl,
             @Value("${theoddsapi.key}") String apiKey) {
-        this.restClient = restClientBuilder.baseUrl(baseUrl).build();
+        this.restClient = restClientBuilder
+                .baseUrl(baseUrl)
+                .requestFactory(ClientHttpRequestFactoryBuilder.detect()
+                        .build(HttpClientSettings.defaults()
+                                .withConnectTimeout(CONNECT_TIMEOUT)
+                                .withReadTimeout(READ_TIMEOUT)))
+                .build();
         this.apiKey = apiKey;
     }
 

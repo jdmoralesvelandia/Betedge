@@ -85,11 +85,16 @@ export interface OddsHistoryEntryDto {
  * used to visually extend a series' line to "still confirmed as of then" instead of leaving it
  * dangling at its own last real point (see lib/oddsWindow.ts's withTrailingConfirmation). Either
  * can be null if that provider has never completed a run yet.
+ *
+ * truncated (2026-09-02): true when the backend capped `entries` at its own row limit and real
+ * history for this match goes back further than what's included (always the most recent rows in
+ * that case, never the oldest) - see MatchDetailPage's own truncation notice for how this surfaces.
  */
 export interface OddsHistoryResponseDto {
   entries: OddsHistoryEntryDto[]
   lastOddsPapiRunAt: string | null
   lastTheOddsApiRunAt: string | null
+  truncated: boolean
 }
 
 export type TriggeredBy = 'SCHEDULED' | 'MANUAL'

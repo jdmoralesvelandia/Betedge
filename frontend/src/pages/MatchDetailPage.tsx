@@ -39,6 +39,10 @@ export function MatchDetailPage() {
   // confirmed as of then" - see lib/oddsWindow.ts's withTrailingConfirmation.
   const [lastOddsPapiRunAt, setLastOddsPapiRunAt] = useState<number | null>(null)
   const [lastTheOddsApiRunAt, setLastTheOddsApiRunAt] = useState<number | null>(null)
+  // True when the backend capped /odds/history at its own row limit - see OddsHistoryResponseDto's
+  // own comment. Always means "more (older) history exists than what's loaded", never a partial or
+  // corrupted response - surfaced below instead of silently rendering an incomplete chart.
+  const [oddsTruncated, setOddsTruncated] = useState(false)
   const [valueBets, setValueBets] = useState<ValueBetDto[]>([])
   const [surebets, setSurebets] = useState<SurebetDto[]>([])
   const [selection, setSelection] = useState<(typeof SELECTIONS)[number]>('home')
@@ -65,6 +69,7 @@ export function MatchDetailPage() {
         setOdds(oddsHistory.entries)
         setLastOddsPapiRunAt(toEpochMs(oddsHistory.lastOddsPapiRunAt))
         setLastTheOddsApiRunAt(toEpochMs(oddsHistory.lastTheOddsApiRunAt))
+        setOddsTruncated(oddsHistory.truncated)
         setValueBets(vbActive)
         setSurebets(sbActive)
       } catch {
@@ -143,6 +148,14 @@ export function MatchDetailPage() {
             ))}
           </div>
         </div>
+        {oddsTruncated && (
+          // Backend-enforced cap - see OddsQueryService.HISTORY_ROW_LIMIT (keep this number in
+          // sync with that constant). Always the most recent rows; older history exists but isn't
+          // loaded, so this is shown instead of a silently-incomplete chart.
+          <p className="mb-4 text-xs text-ink-faint">
+            Mostrando los últimos 2000 registros de precio - hay más historial disponible.
+          </p>
+        )}
         <SingleBookmakerChart
           entries={filteredOdds}
           showFullHistory={showFullHistory}
