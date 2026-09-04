@@ -121,7 +121,7 @@ export function IngestionRunPanel({ title, description, buttonLabel, fetchLastRu
         type="button"
         onClick={() => void handleTrigger()}
         disabled={triggering}
-        className="rounded-md bg-series-1 px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+        className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-2 disabled:opacity-50"
       >
         {triggering ? 'Ejecutando ingesta…' : buttonLabel}
       </button>

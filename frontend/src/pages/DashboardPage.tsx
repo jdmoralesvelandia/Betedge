@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
 import { Layout } from '../components/Layout'
+import { StaticBrandBackground } from '../components/StaticBrandBackground'
 import { EmptyState } from '../components/EmptyState'
 import { LastUpdatedBadge } from '../components/LastUpdatedBadge'
+import { SegmentedControl } from '../components/SegmentedControl'
 import { ValueBetCard } from '../components/ValueBetCard'
 import { SurebetCard } from '../components/SurebetCard'
 import { useAuth } from '../auth/AuthContext'
@@ -135,6 +137,8 @@ export function DashboardPage() {
 
   return (
     <Layout>
+      <StaticBrandBackground />
+
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-ink">Oportunidades activas</h1>
@@ -162,33 +166,21 @@ export function DashboardPage() {
       {!loading && !hasNothing && (
         <>
           <div className="mb-6 flex flex-wrap items-center gap-3">
-            <div className="flex gap-1 rounded-md bg-surface-2 p-1">
-              <button
-                type="button"
-                onClick={() => updateActiveTab('valueBets')}
-                className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-                  activeTab === 'valueBets' ? 'bg-series-1 text-white' : 'text-ink-soft hover:text-ink'
-                }`}
-              >
-                Value Bets ({collapsedValueBets.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => updateActiveTab('surebets')}
-                className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-                  activeTab === 'surebets' ? 'bg-series-1 text-white' : 'text-ink-soft hover:text-ink'
-                }`}
-              >
-                Surebets ({collapsedSurebets.length})
-              </button>
-            </div>
+            <SegmentedControl
+              options={[
+                { value: 'valueBets', label: `Value Bets (${collapsedValueBets.length})` },
+                { value: 'surebets', label: `Surebets (${collapsedSurebets.length})` },
+              ]}
+              value={activeTab}
+              onChange={updateActiveTab}
+            />
 
             {availableCompetitions.length > 0 && (
               <select
                 value={competitionFilter}
                 onChange={(e) => updateCompetitionFilter(e.target.value)}
                 aria-label="Liga"
-                className="rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-ink-soft"
+                className="rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-ink-soft outline-none transition-colors focus:border-brand"
               >
                 <option value={ALL_COMPETITIONS}>Todas las ligas</option>
                 {availableCompetitions.map((name) => (
@@ -206,8 +198,14 @@ export function DashboardPage() {
                 <p className="text-sm text-ink-faint">No hay value bets activos para esta liga ahora mismo.</p>
               ) : (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {collapsedValueBets.map((vb) => (
-                    <ValueBetCard key={vb.id} valueBet={vb} fromLocation={location.pathname + location.search} />
+                  {collapsedValueBets.map((vb, index) => (
+                    <div
+                      key={vb.id}
+                      className="flex motion-safe:animate-fade-up motion-safe:opacity-0"
+                      style={{ animationDelay: `${Math.min(index * 40, 320)}ms` }}
+                    >
+                      <ValueBetCard valueBet={vb} fromLocation={location.pathname + location.search} />
+                    </div>
                   ))}
                 </div>
               )}
@@ -218,8 +216,14 @@ export function DashboardPage() {
                 <p className="text-sm text-ink-faint">No hay surebets activos para esta liga ahora mismo.</p>
               ) : (
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                  {collapsedSurebets.map((sb) => (
-                    <SurebetCard key={sb.id} surebet={sb} fromLocation={location.pathname + location.search} />
+                  {collapsedSurebets.map((sb, index) => (
+                    <div
+                      key={sb.id}
+                      className="flex motion-safe:animate-fade-up motion-safe:opacity-0"
+                      style={{ animationDelay: `${Math.min(index * 40, 320)}ms` }}
+                    >
+                      <SurebetCard surebet={sb} fromLocation={location.pathname + location.search} />
+                    </div>
                   ))}
                 </div>
               )}

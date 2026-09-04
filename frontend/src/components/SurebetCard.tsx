@@ -25,11 +25,11 @@ export function SurebetCard({
   const guaranteedProfit = (amount * surebet.profitPercentage) / 100
 
   return (
-    <div className="flex flex-col rounded-xl border border-border bg-surface transition-colors hover:border-series-1/60">
+    <div className="flex w-full flex-col rounded-xl border border-border bg-surface transition-all duration-200 hover:border-brand/60 hover:shadow-[0_0_20px_-8px_var(--color-brand)]">
       <Link
         to={`/matches/${surebet.matchId}`}
         state={fromLocation ? { from: fromLocation } : undefined}
-        className="group flex flex-col gap-3 p-4"
+        className="group flex flex-col gap-3 rounded-t-xl p-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
       >
         <div className="flex items-center justify-between text-xs text-ink-faint">
           <span className="truncate">{surebet.competitionName}</span>

@@ -14,22 +14,66 @@ const FEATURE_PILLS = [
  * already knows (value bet, surebet) with a small worked example each, using invented-but-
  * internally-consistent numbers (never real match data) purely for illustration - same visual
  * language as ValueBetCard/SurebetCard (bg-good-soft edge badge, surface-2 rows) so the example
- * reads as "a preview of what those real cards show", not a separate landing-page aesthetic.
+ * reads as "a preview of what those real cards show", not a separate landing-page aesthetic - the
+ * edge-badge shape below is deliberately NOT part of this page's own redesign, for that reason.
+ *
+ * Redesign pilot (2026-09-03): violet/purple brand accent + atmospheric glow + staggered entrance,
+ * scoped to THIS page and LoginPage only - see index.css's own comment on --color-brand/
+ * --animate-fade-up/--animate-breathe for why those are additive tokens, never a replacement for
+ * what Layout/Dashboard/MatchesPage/MatchDetailPage/AdminPage already use. All motion is gated
+ * behind Tailwind's motion-safe: variant (prefers-reduced-motion: no-preference) - under reduced
+ * motion, every motion-safe:-prefixed class simply never applies, so content renders at its final
+ * position/opacity immediately, animation-free.
  */
 export function HomePage() {
   return (
     <Layout>
+      {/* Fixed so it covers the viewport regardless of scroll/nesting inside <main>, -z-10 so it
+          paints behind all normal-flow content (including Layout's own opaque header) without
+          needing z-index on anything else. aria-hidden - purely decorative. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 -z-10 blur-[80px] motion-safe:animate-breathe"
+        style={{
+          background:
+            'radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--color-brand) 38%, transparent), transparent 55%),' +
+            'radial-gradient(circle at 82% 70%, color-mix(in srgb, var(--color-brand-2) 30%, transparent), transparent 60%)',
+        }}
+      />
+
       <section className="mb-10 flex flex-col items-center px-2 pt-4 text-center sm:pt-8">
-        <div className="mb-3 flex items-center gap-2">
-          <span className="inline-block h-3 w-3 rounded-full bg-series-1" aria-hidden="true" />
-          <span className="text-2xl font-semibold text-ink sm:text-3xl">BetEdge</span>
+        <div
+          className="mb-3 flex items-center gap-2 motion-safe:opacity-0 motion-safe:animate-fade-up"
+          style={{ animationDelay: '0ms' }}
+        >
+          <span
+            className="inline-block h-3 w-3 rounded-full bg-brand shadow-[0_0_16px_var(--color-brand)]"
+            aria-hidden="true"
+          />
+          {/* pb-[0.15em]: background-clip: text paints the gradient only inside the element's own
+              box, sized by line-height - text-4xl/text-6xl's line-height:1 is tighter than this
+              bold weight's real glyph extent, so without this the "g"'s descender falls outside
+              that box and renders with no gradient color (looks visually cut off). An inline
+              element's own vertical padding doesn't affect line layout/height, so this only grows
+              the background-painting area downward - confirmed it doesn't shift the dot's
+              alignment (both sit inside the same items-center row, sized by line-height, not by
+              this padding). em-based so it scales with sm:text-6xl too. */}
+          <span className="bg-gradient-to-r from-brand to-brand-2 bg-clip-text pb-[0.15em] text-4xl font-extrabold tracking-tight text-transparent sm:text-6xl">
+            BetEdge
+          </span>
         </div>
-        <p className="max-w-xl text-sm text-ink-soft sm:text-base">
+        <p
+          className="max-w-xl text-sm text-ink-soft motion-safe:opacity-0 motion-safe:animate-fade-up sm:text-base"
+          style={{ animationDelay: '80ms' }}
+        >
           Encuentra ventajas estadísticas reales en las cuotas de fútbol, antes de que el mercado se corrija.
         </p>
       </section>
 
-      <section className="mb-8 rounded-xl border border-border bg-surface p-5 sm:p-6">
+      <section
+        className="mb-8 rounded-2xl border border-border bg-surface p-5 motion-safe:opacity-0 motion-safe:animate-fade-up sm:p-6"
+        style={{ animationDelay: '160ms' }}
+      >
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-ink-faint">¿Qué es BetEdge?</h2>
         <p className="text-sm leading-relaxed text-ink-soft sm:text-base">
           Un sistema que agrega cuotas de dos proveedores (OddsPapi y The Odds API) para 6 ligas de fútbol -
@@ -42,7 +86,7 @@ export function HomePage() {
           {FEATURE_PILLS.map((pill) => (
             <span
               key={pill}
-              className="rounded-full border border-border bg-surface-2 px-3 py-1 text-xs font-medium text-ink-soft"
+              className="rounded-full border border-brand/30 bg-brand/10 px-3 py-1 text-xs font-medium text-ink-soft transition-colors duration-300 hover:border-brand/60 hover:text-ink"
             >
               {pill}
             </span>
@@ -51,7 +95,10 @@ export function HomePage() {
       </section>
 
       <section className="mb-10 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <article className="flex flex-col rounded-xl border border-border bg-surface p-5 sm:p-6">
+        <article
+          className="flex flex-col rounded-2xl border border-border bg-surface p-5 transition-all duration-300 motion-safe:opacity-0 motion-safe:animate-fade-up motion-safe:hover:-translate-y-1 hover:border-brand/40 hover:shadow-[0_0_40px_-12px_var(--color-brand)] sm:p-6"
+          style={{ animationDelay: '240ms' }}
+        >
           <h3 className="mb-2 flex items-center gap-2 text-base font-semibold text-ink">
             <span className="inline-block h-2 w-2 rounded-full bg-good" aria-hidden="true" />
             ¿Qué es un Value Bet?
@@ -86,7 +133,10 @@ export function HomePage() {
           </div>
         </article>
 
-        <article className="flex flex-col rounded-xl border border-border bg-surface p-5 sm:p-6">
+        <article
+          className="flex flex-col rounded-2xl border border-border bg-surface p-5 transition-all duration-300 motion-safe:opacity-0 motion-safe:animate-fade-up motion-safe:hover:-translate-y-1 hover:border-brand/40 hover:shadow-[0_0_40px_-12px_var(--color-brand)] sm:p-6"
+          style={{ animationDelay: '320ms' }}
+        >
           <h3 className="mb-2 flex items-center gap-2 text-base font-semibold text-ink">
             <span className="inline-block h-2 w-2 rounded-full bg-good" aria-hidden="true" />
             ¿Qué es un Surebet?
@@ -130,16 +180,19 @@ export function HomePage() {
         </article>
       </section>
 
-      <section className="flex flex-wrap items-center justify-center gap-3 pb-4">
+      <section
+        className="flex flex-wrap items-center justify-center gap-3 pb-4 motion-safe:opacity-0 motion-safe:animate-fade-up"
+        style={{ animationDelay: '400ms' }}
+      >
         <Link
           to="/dashboard"
-          className="rounded-md bg-series-1 px-5 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+          className="rounded-full bg-gradient-to-r from-brand to-brand-2 px-6 py-2.5 text-sm font-semibold text-white transition-all duration-300 motion-safe:hover:-translate-y-0.5 hover:shadow-[0_0_30px_-6px_var(--color-brand)]"
         >
           Ver oportunidades activas
         </Link>
         <Link
           to="/matches"
-          className="rounded-md border border-border px-5 py-2.5 text-sm font-semibold text-ink-soft transition-colors hover:bg-surface-2 hover:text-ink"
+          className="rounded-full border border-border px-6 py-2.5 text-sm font-semibold text-ink-soft transition-all duration-300 motion-safe:hover:-translate-y-0.5 hover:border-brand/50 hover:text-ink"
         >
           Ver partidos
         </Link>

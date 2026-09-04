@@ -3,6 +3,7 @@ import { Link, useLocation, useParams } from 'react-router-dom'
 import { Layout } from '../components/Layout'
 import { EmptyState } from '../components/EmptyState'
 import { ChevronIcon } from '../components/ChevronIcon'
+import { SegmentedControl } from '../components/SegmentedControl'
 import { OddsHistoryChart } from '../components/OddsHistoryChart'
 import { SingleBookmakerChart } from '../components/SingleBookmakerChart'
 import { ValueBetCard } from '../components/ValueBetCard'
@@ -118,7 +119,7 @@ export function MatchDetailPage() {
 
   return (
     <Layout>
-      <Link to={backTo} className="mb-4 inline-block text-sm text-ink-faint hover:text-ink">
+      <Link to={backTo} className="mb-4 inline-block text-sm text-ink-faint transition-colors hover:text-brand">
         {backLabel}
       </Link>
 
@@ -133,20 +134,12 @@ export function MatchDetailPage() {
       <section className="mb-8 rounded-xl border border-border bg-surface p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-ink">Evolución de cuotas por casa de apuestas</h2>
-          <div className="flex gap-1 rounded-md bg-surface-2 p-1">
-            {SELECTIONS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setSelection(s)}
-                className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
-                  selection === s ? 'bg-series-1 text-white' : 'text-ink-soft hover:text-ink'
-                }`}
-              >
-                {selectionLabel(s)}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            options={SELECTIONS.map((s) => ({ value: s, label: selectionLabel(s) }))}
+            value={selection}
+            onChange={setSelection}
+            size="sm"
+          />
         </div>
         {oddsTruncated && (
           // Backend-enforced cap - see OddsQueryService.HISTORY_ROW_LIMIT (keep this number in
@@ -168,7 +161,7 @@ export function MatchDetailPage() {
           type="button"
           onClick={() => setShowComparison((prev) => !prev)}
           aria-expanded={showComparison}
-          className="mt-6 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-ink-faint transition-colors hover:text-ink-soft"
+          className="mt-6 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-ink-faint transition-colors hover:text-brand"
         >
           <ChevronIcon open={showComparison} />
           Comparación de casas
@@ -199,8 +192,14 @@ export function MatchDetailPage() {
           />
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {sortedValueBets.map((vb) => (
-              <ValueBetCard key={vb.id} valueBet={vb} showDetectedAt fromLocation={from} />
+            {sortedValueBets.map((vb, index) => (
+              <div
+                key={vb.id}
+                className="flex motion-safe:animate-fade-up motion-safe:opacity-0"
+                style={{ animationDelay: `${Math.min(index * 40, 320)}ms` }}
+              >
+                <ValueBetCard valueBet={vb} showDetectedAt fromLocation={from} />
+              </div>
             ))}
           </div>
         )}
@@ -218,8 +217,14 @@ export function MatchDetailPage() {
           />
         ) : (
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            {surebets.map((sb) => (
-              <SurebetCard key={sb.id} surebet={sb} showDetectedAt fromLocation={from} />
+            {surebets.map((sb, index) => (
+              <div
+                key={sb.id}
+                className="flex motion-safe:animate-fade-up motion-safe:opacity-0"
+                style={{ animationDelay: `${Math.min(index * 40, 320)}ms` }}
+              >
+                <SurebetCard surebet={sb} showDetectedAt fromLocation={from} />
+              </div>
             ))}
           </div>
         )}

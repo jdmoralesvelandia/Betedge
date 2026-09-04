@@ -18,7 +18,7 @@ export function Layout({ children }: { children: ReactNode }) {
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-6">
             <NavLink to="/" className="flex items-center gap-2 text-base font-semibold text-ink">
-              <span className="inline-block h-2.5 w-2.5 rounded-full bg-series-1" aria-hidden="true" />
+              <span className="inline-block h-2.5 w-2.5 rounded-full bg-brand" aria-hidden="true" />
               BetEdge
             </NavLink>
             <nav className="flex items-center gap-1">

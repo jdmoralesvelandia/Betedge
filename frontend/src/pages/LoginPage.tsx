@@ -132,28 +132,59 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center px-4 py-10">
+    <div className="relative flex min-h-full items-center justify-center overflow-hidden px-4 py-10">
+      {/* Redesign pilot (2026-09-03) - see HomePage.tsx's own class-level comment for the full
+          rationale (additive brand tokens, motion-safe-gated animation, scoped to these 2 pages
+          only). Positioned absolute (not fixed) since this page has no shared Layout ancestor to
+          escape - its own top-level wrapper above already covers the viewport. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10 blur-[80px] motion-safe:animate-breathe"
+        style={{
+          background:
+            'radial-gradient(circle at 25% 20%, color-mix(in srgb, var(--color-brand) 35%, transparent), transparent 55%),' +
+            'radial-gradient(circle at 75% 80%, color-mix(in srgb, var(--color-brand-2) 28%, transparent), transparent 60%)',
+        }}
+      />
+
       <div className="w-full max-w-sm">
-        <div className="mb-6 flex items-center justify-center gap-2">
-          <span className="inline-block h-2.5 w-2.5 rounded-full bg-series-1" aria-hidden="true" />
-          <span className="text-lg font-semibold text-ink">BetEdge</span>
+        <div
+          className="mb-6 flex items-center justify-center gap-2 motion-safe:opacity-0 motion-safe:animate-fade-up"
+          style={{ animationDelay: '0ms' }}
+        >
+          <span
+            className="inline-block h-2.5 w-2.5 rounded-full bg-brand shadow-[0_0_14px_var(--color-brand)]"
+            aria-hidden="true"
+          />
+          {/* pb-[0.15em]: same background-clip: text descender fix as HomePage's own logo - see
+              its comment for the full explanation. */}
+          <span className="bg-gradient-to-r from-brand to-brand-2 bg-clip-text pb-[0.15em] text-xl font-extrabold tracking-tight text-transparent">
+            BetEdge
+          </span>
         </div>
 
         <button
           type="button"
           onClick={fillDemoAccount}
-          className="mb-4 flex w-full items-center justify-between gap-2 rounded-lg border border-series-1/40 bg-series-1/10 px-4 py-3 text-left text-sm text-ink transition-colors hover:border-series-1/70"
+          className="mb-4 flex w-full items-center justify-between gap-2 rounded-2xl border border-brand/30 bg-brand/10 px-4 py-3 text-left text-sm text-ink transition-all duration-300 motion-safe:opacity-0 motion-safe:animate-fade-up motion-safe:hover:-translate-y-0.5 hover:border-brand/60"
+          style={{ animationDelay: '80ms' }}
         >
           <span>
             <span className="font-medium">Prueba con la cuenta demo</span>
             <span className="block text-xs text-ink-faint">{DEMO_EMAIL}</span>
           </span>
-          <span className="text-series-1">→</span>
+          <span className="text-brand">→</span>
         </button>
 
-        <div className="rounded-xl border border-border bg-surface p-6">
+        <div
+          className="rounded-2xl border border-border bg-surface p-6 motion-safe:opacity-0 motion-safe:animate-fade-up"
+          style={{ animationDelay: '160ms' }}
+        >
           <h1 className="mb-4 text-lg font-semibold text-ink">Iniciar sesión</h1>
 
+          {/* Google's own iframe renders inside this div with its own fixed styling - we only
+              control the container around it, never its internals (see LoginPage's own module
+              comment on GoogleIdentityServices). */}
           <div ref={googleButtonRef} className="mb-4 flex justify-center" />
 
           <div className="mb-4 flex items-center gap-3">
@@ -171,7 +202,7 @@ export function LoginPage() {
                 autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-ink outline-none focus:border-series-1"
+                className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-ink outline-none transition-colors duration-200 focus:border-brand"
               />
             </label>
 
@@ -183,12 +214,12 @@ export function LoginPage() {
                 autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-ink outline-none focus:border-series-1"
+                className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-ink outline-none transition-colors duration-200 focus:border-brand"
               />
             </label>
 
             {error && (
-              <p className="mb-4 rounded-md bg-critical-soft px-3 py-2 text-sm text-critical" role="alert">
+              <p className="mb-4 rounded-lg bg-critical-soft px-3 py-2 text-sm text-critical" role="alert">
                 {error}
               </p>
             )}
@@ -196,7 +227,7 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full rounded-md bg-series-1 px-3 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+              className="w-full rounded-full bg-gradient-to-r from-brand to-brand-2 px-3 py-2.5 text-sm font-semibold text-white transition-all duration-300 motion-safe:hover:-translate-y-0.5 hover:shadow-[0_0_30px_-6px_var(--color-brand)] disabled:opacity-50 motion-safe:disabled:hover:translate-y-0"
             >
               {submitting ? 'Entrando…' : 'Entrar'}
             </button>

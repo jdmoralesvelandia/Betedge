@@ -33,6 +33,53 @@
   --color-series-6: #4caf50;
   --color-series-7: #9085e9;
   --color-series-8: #e66767;
+
+  /* Brand accent (2026-09-03, HomePage/LoginPage redesign pilot) - since extended site-wide as
+     the app's one real accent color (nav dot, card hover/focus, active pills, SegmentedControl -
+     see Layout.tsx/ValueBetCard.tsx/SegmentedControl.tsx), replacing those surfaces' pre-pilot
+     habit of borrowing --color-series-1, a chart-series-identity color, as a stand-in "primary"
+     color. --color-series-1 itself is untouched - still exclusively chart-series identity. */
+  --color-brand: #a855f7;
+  --color-brand-2: #7c3aed;
+  /* Dark tint of the same brand hue - NOT a translucent/alpha version of --color-brand, a real
+     opaque dark step (own hex, like every other token here) so it reads as solid fill rather
+     than a wash. Introduced for SegmentedControl's own container background (2026-09-03): needs
+     to sit under BOTH white active-option text and --color-ink-soft inactive text at AA+, while
+     staying visibly darker than --color-brand itself so the active option still pops against its
+     own container. Contrast checked: ~7.7:1 against --color-ink-soft, ~16:1 against white -
+     both comfortably above the 4.5:1 AA floor. */
+  --color-brand-dark: #3b1868;
+
+  /* Same redesign-pilot scope as --color-brand above - see Tailwind's --animate-* theme keys
+     (auto-generates the animate-fade-up/animate-breathe utilities used only in HomePage.tsx/
+     LoginPage.tsx, gated there behind the motion-safe: variant - see prefers-reduced-motion
+     handling in App.css... i.e. right here, via Tailwind's own motion-safe/motion-reduce
+     variants, which read the same media feature). */
+  --animate-fade-up: fade-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-breathe: breathe 16s ease-in-out infinite;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
 }
 
 html,

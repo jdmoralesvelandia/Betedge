@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { Layout } from '../components/Layout'
+import { StaticBrandBackground } from '../components/StaticBrandBackground'
 import { EmptyState } from '../components/EmptyState'
 import { LastUpdatedBadge } from '../components/LastUpdatedBadge'
 import { useAuth } from '../auth/AuthContext'
@@ -125,6 +126,8 @@ export function MatchesPage() {
 
   return (
     <Layout>
+      <StaticBrandBackground />
+
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-ink">Partidos</h1>
@@ -140,7 +143,7 @@ export function MatchesPage() {
           value={competitionId ?? ''}
           onChange={(e) => updateCompetitionId(e.target.value ? Number(e.target.value) : null)}
           aria-label="Liga"
-          className="rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-ink-soft"
+          className="rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-ink-soft outline-none transition-colors focus:border-brand"
         >
           <option value="">Todas las ligas</option>
           {competitions.map((c) => (
@@ -155,7 +158,7 @@ export function MatchesPage() {
           onChange={(e) => setSearchInput(e.target.value)}
           placeholder="Buscar equipo…"
           aria-label="Buscar equipo"
-          className="min-w-0 flex-1 rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-ink placeholder:text-ink-faint sm:max-w-xs"
+          className="min-w-0 flex-1 rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-ink placeholder:text-ink-faint outline-none transition-colors focus:border-brand sm:max-w-xs"
         />
         <label className="flex items-center gap-2 text-sm text-ink-soft">
           <span className="whitespace-nowrap">Finalizados:</span>
@@ -163,7 +166,7 @@ export function MatchesPage() {
             value={finishedFilter}
             onChange={(e) => updateFinishedFilter(e.target.value)}
             aria-label="Finalizados"
-            className="rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-ink-soft"
+            className="rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-ink-soft outline-none transition-colors focus:border-brand"
           >
             {FINISHED_WINDOW_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
