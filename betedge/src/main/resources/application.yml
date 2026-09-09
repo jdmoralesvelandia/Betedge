@@ -31,7 +31,10 @@ google:
     client-id: ${GOOGLE_OAUTH_CLIENT_ID:848697196247-cls6qjq919e5b82tjsvs3vjtnm4lgl10.apps.googleusercontent.com}
 
 cors:
-  allowed-origin: ${CORS_ALLOWED_ORIGIN:http://localhost:5173}
+  # Comma-separated - see SecurityConfig.corsConfigurationSource's own comment for why this is a
+  # list, not a single origin. Renamed from CORS_ALLOWED_ORIGIN on 2026-09-04 for the Oracle
+  # deployment prep - keep .env/.env.example and docker-compose.prod.yml in sync if this changes.
+  allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173}
 
 oddspapi:
   base-url: ${ODDSPAPI_BASE_URL:https://api.oddspapi.io/v4}

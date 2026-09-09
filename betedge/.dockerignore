@@ -1,0 +1,9 @@
+target/
+.git/
+.env
+.env.example
+.mvn/wrapper/maven-wrapper.jar
+exploracion-api/
+exploracion-odds-api/
+README-notas.md
+*.md

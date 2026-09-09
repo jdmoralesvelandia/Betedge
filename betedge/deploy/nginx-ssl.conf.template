@@ -1,0 +1,64 @@
+# Fase 2 (HTTP + HTTPS) - deploy/setup-tls.sh copia este archivo sobre el que Nginx está usando
+# (reemplazando nginx.conf.template, Fase 1) DESPUÉS de obtener el certificado real vía Certbot, y
+# recarga Nginx. No se usa nunca en el primer arranque - ver el comentario de cabecera de
+# nginx.conf.template para por qué el orden tiene que ser este y no al revés.
+#
+# Mismo placeholder único (${DOMAIN_NAME}) y misma regla de nunca usar ${...} para variables
+# propias de Nginx (siempre $host, nunca ${host}) - ver el comentario de nginx.conf.template para
+# el porqué completo (envsubst con lista explícita de una sola variable).
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN_NAME};
+
+    # La renovación automática de Certbot (deploy/setup-tls.sh) sigue usando el método webroot
+    # por HTTP plano - esta ruta nunca redirige a HTTPS, a diferencia de todo lo demás en este
+    # server{}. Si esto llegara a redirigir, la renovación automática fallaría en silencio hasta
+    # que el certificado expirara.
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${DOMAIN_NAME};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem;
+    # Parámetros TLS razonables sin depender del archivo options-ssl-nginx.conf que certbot
+    # genera solo con el plugin --nginx (acá usamos --webroot, ver setup-tls.sh, así que ese
+    # archivo nunca se genera) - versión mínima propia en vez de asumir un archivo que no existe.
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers off;
+
+    # Mismo contenido que la Fase 1 (nginx.conf.template) para el resto del server{} - ver esos
+    # comentarios para el porqué de cada línea (fallback de la SPA, prefijo /api/, cookie de
+    # refresh). Duplicado a propósito en vez de un include compartido: son dos archivos que se
+    # activan en momentos distintos del despliegue, mantenerlos autocontenidos evita que un
+    # cambio a mitad de la Fase 1 (antes de tener certificados) se le olvide replicar acá.
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass http://backend:8080/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass_header Set-Cookie;
+    }
+}

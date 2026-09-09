@@ -1,0 +1,71 @@
+# Fase 1 (HTTP only) - la config que Nginx usa desde el primer `docker-compose -f
+# docker-compose.prod.yml up`, ANTES de que exista ningún certificado TLS. No incluye ningún
+# server{} en 443 a propósito: si lo incluyera, Nginx fallaría al arrancar la primera vez porque
+# los archivos de certificado todavía no existen (problema del huevo y la gallina: Certbot
+# necesita un servidor HTTP ya funcionando en el puerto 80 para completar el challenge HTTP-01,
+# pero ese challenge es precisamente lo que produce el certificado que un server{} en 443
+# necesitaría para arrancar).
+#
+# deploy/setup-tls.sh reemplaza este archivo por deploy/nginx-ssl.conf.template (Fase 2, con el
+# bloque 443 ya incluido) DESPUÉS de obtener el certificado real vía el método webroot - ver el
+# comentario en la cabecera de ese script para el flujo completo en dos fases.
+#
+# ${DOMAIN_NAME} es el ÚNICO placeholder de este archivo - se sustituye por el nombre de dominio
+# real (ej. betedge-jdm.duckdns.org) recién se sepa. La sustitución la hace explícitamente el
+# `command` del servicio nginx en docker-compose.prod.yml, vía
+# `envsubst '$$DOMAIN_NAME'` (con lista explícita de UNA sola variable) - nunca un envsubst sin
+# argumentos, que reemplazaría también las variables propias de Nginx que aparecen como ${algo}
+# en este archivo (no hay ninguna en este archivo en concreto, pero sí las habrá en
+# nginx-ssl.conf.template) dejándolas vacías y rompiendo la config. Por esa misma razón, toda
+# variable propia de Nginx en este archivo se escribe SIEMPRE sin llaves ($host, no ${host}).
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN_NAME};
+
+    # Certbot (método webroot) escribe aquí el archivo de verificación del challenge HTTP-01 y
+    # espera poder pedirlo de vuelta por HTTP plano en esta misma ruta - por eso este location
+    # existe también en nginx-ssl.conf.template (Fase 2), donde el resto del tráfico sí redirige
+    # a HTTPS pero esta ruta puntual nunca debe hacerlo (la renovación automática de Certbot deja
+    # de funcionar si esta ruta empieza a redirigir).
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    # Build estático del frontend (`npm run build` dentro de frontend/, ver README-notas.md o el
+    # checklist de despliegue en CLAUDE.md) - montado de solo lectura en docker-compose.prod.yml.
+    # try_files con fallback a index.html: rutas de React Router como /dashboard o /matches/42 no
+    # existen como archivo real, así que cualquier ruta que no matchee un archivo real cae a
+    # index.html y React Router toma el control del lado del cliente - sin este fallback, refrescar
+    # la página en cualquier ruta que no sea "/" daría 404 de Nginx en vez de cargar la SPA.
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Todo lo que el backend expone vive bajo /api/ de este lado - el backend en sí NO tiene
+    # ningún prefijo /api en sus propias rutas (son /auth, /matches, /value-bets, etc., montadas
+    # en la raíz - ver los @RequestMapping reales en com.betedge.*.* Controller). La barra final
+    # en proxy_pass (".../;") es la que hace que Nginx recorte el prefijo /api/ antes de reenviar
+    # - así /api/matches le llega al backend como /matches, sin tener que tocar ni un controller.
+    #
+    # Esto solo funciona si el frontend de producción se compiló con
+    # VITE_API_BASE_URL=https://${DOMAIN_NAME}/api (con el /api al final) - en dev
+    # VITE_API_BASE_URL apunta directo a http://localhost:8080, sin /api, porque en dev el
+    # frontend y el backend son dos orígenes distintos (de ahí ALLOWED_ORIGINS/CORS) en vez de
+    # compartir uno solo detrás de este proxy. Ver el checklist de build en CLAUDE.md.
+    location /api/ {
+        proxy_pass http://backend:8080/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # El refresh token viaja en una cookie HttpOnly - debe pasar intacta en ambas direcciones,
+        # Nginx no la toca por defecto, esto es solo para dejarlo explícito y no asumido.
+        proxy_pass_header Set-Cookie;
+    }
+}

@@ -1,5 +1,6 @@
 package com.betedge.auth;
 
+import java.util.Arrays;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -34,10 +35,20 @@ public class SecurityConfig {
         return configuration.getAuthenticationManager();
     }
 
+    /**
+     * Comma-separated list, not a single origin - production may need to allow more than one
+     * (e.g. the bare domain and a www. alias, or a staging frontend) without a code change.
+     * Defaults to the local Vite dev server so local dev keeps working with zero setup; production
+     * sets ALLOWED_ORIGINS explicitly (see docker-compose.prod.yml) to the real domain(s), never
+     * relying on this default.
+     */
     @Bean
-    public CorsConfigurationSource corsConfigurationSource(@Value("${cors.allowed-origin}") String allowedOrigin) {
+    public CorsConfigurationSource corsConfigurationSource(@Value("${cors.allowed-origins}") String allowedOrigins) {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of(allowedOrigin));
+        configuration.setAllowedOrigins(Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isBlank())
+                .toList());
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);

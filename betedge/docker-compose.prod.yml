@@ -1,0 +1,152 @@
+# Producción (Oracle Cloud Always Free, 2 OCPU / 12 GB Ampere A1 Flex) - NO se ha desplegado
+# todavía, esto es Fase 2/3 de esa preparación. Límites y valores justificados con medición real
+# (docker stats en reposo y bajo carga real: login, value-bets/surebets, sync de referencia en
+# frío, una ingesta manual completa de ambos proveedores) - no son valores de tutorial. Ver
+# betedge/README-notas.md o el hilo de la sesión que fijó estos números para el detalle completo.
+#
+# Nginx (agregado 2026-09-04, deploy/nginx.conf.template + deploy/nginx-ssl.conf.template) sirve
+# el build estático del frontend y hace reverse proxy de /api/ al backend - ver el comentario de
+# cabecera de nginx.conf.template para el flujo en dos fases (HTTP solo -> HTTP+HTTPS, activado
+# por deploy/setup-tls.sh después de obtener el certificado real). El backend deja de publicar su
+# puerto al host (ver su propio servicio abajo) - solo Nginx queda expuesto al exterior, el
+# backend solo es alcanzable dentro de la red interna de Docker.
+#
+# docker-compose.yml (dev) queda intacto - este archivo es exclusivamente para producción.
+name: betedge-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: betedge-postgres
+    restart: unless-stopped
+    mem_limit: 1g
+    environment:
+      POSTGRES_DB: ${DB_NAME:-betedge}
+      POSTGRES_USER: ${DB_USERNAME:-betedge}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in the environment or an .env.prod file}
+    # GUC overrides via `command`, no postgresql.conf propio - son 4 valores, no vale la pena un
+    # archivo de config aparte todavía. Justificación de cada uno en el Paso 2 del hilo:
+    #   - shared_buffers=256MB: ~5x el pico real medido (47 MiB) contra la tabla `odds` real de
+    #     25k filas + sus índices (5.8 MiB en total) - margen real para el crecimiento proyectado
+    #     a 12 meses (~226 MiB en el peor caso), no ajustado al byte.
+    #   - max_connections=30: el pool de HikariCP no tiene tamaño explícito en application.yml,
+    #     así que usa el default de Spring Boot (10) - 30 da 3x margen para psql manual/debugging
+    #     sin reservar overhead de conexión para 100 slots que nunca se van a usar (default de
+    #     Postgres).
+    #   - work_mem=8MB: caso peor real (todas las conexiones corriendo una query con sort/hash a
+    #     la vez, escenario que esta app nunca genera en la práctica - son selects simples sobre
+    #     tablas pequeñas) = 8MB x 30 = 240MB, ya contado en el mem_limit de 1g de arriba.
+    #   - maintenance_work_mem=128MB: solo se usa durante VACUUM/autovacuum/creación de índice,
+    #     nunca simultáneo con el work_mem de arriba en la práctica.
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "max_connections=30"
+      - "-c"
+      - "work_mem=8MB"
+      - "-c"
+      - "maintenance_work_mem=128MB"
+    volumes:
+      - betedge_pgdata_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-betedge} -d ${DB_NAME:-betedge}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: .
+    container_name: betedge-backend
+    restart: unless-stopped
+    mem_limit: 3g
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-betedge}
+      DB_USERNAME: ${DB_USERNAME:-betedge}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in the environment or an .env.prod file}
+      JWT_SECRET: ${JWT_SECRET:?set a real 32+ byte secret, never the dev one}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-3600000}
+      JWT_REFRESH_EXPIRATION_MS: ${JWT_REFRESH_EXPIRATION_MS:-604800000}
+      JWT_REFRESH_COOKIE_SECURE: "true"
+      ADMIN_BOOTSTRAP_SECRET: ${ADMIN_BOOTSTRAP_SECRET:?set a real secret, never the dev one}
+      # Comma-separated - see SecurityConfig.corsConfigurationSource. Typically just
+      # https://${DOMAIN_NAME} here, since the frontend is served same-origin via Nginx (see
+      # deploy/nginx.conf.template) - a list only matters if a second origin (www. alias, staging
+      # frontend) also needs to call this API directly.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?set the real frontend origin(s), comma-separated}
+      ODDSPAPI_API_KEY: ${ODDSPAPI_API_KEY:?}
+      THEODDSAPI_API_KEY: ${THEODDSAPI_API_KEY:?}
+      # Cada scheduler se enciende explícitamente, uno por uno, cuando se decida - no todos a la
+      # vez por default solo porque este es el compose de "producción". Ver CLAUDE.md/aplication.yml
+      # para el presupuesto de cada uno antes de encender THEODDSAPI/hot-refresh.
+      ODDS_INGESTION_SCHEDULING_ENABLED: ${ODDS_INGESTION_SCHEDULING_ENABLED:-true}
+      THEODDSAPI_INGESTION_SCHEDULING_ENABLED: ${THEODDSAPI_INGESTION_SCHEDULING_ENABLED:-false}
+      HOT_REFRESH_SCHEDULING_ENABLED: ${HOT_REFRESH_SCHEDULING_ENABLED:-false}
+      MATCH_STATUS_UPDATE_SCHEDULING_ENABLED: ${MATCH_STATUS_UPDATE_SCHEDULING_ENABLED:-false}
+      REFERENCE_DATA_SYNC_SCHEDULING_ENABLED: ${REFERENCE_DATA_SYNC_SCHEDULING_ENABLED:-true}
+      # -Xms bajo porque el arranque real no necesita más (medido: 390 MiB de RSS total en reposo,
+      # muy por debajo incluso de este heap inicial) - deja que crezca solo si hace falta en vez de
+      # reservarlo todo de una. -Xmx1536m es ~3.4x el pico total de RSS medido bajo carga real
+      # (456 MiB, heap+metaspace+threads+todo) - margen real para más tráfico/ingestas más pesadas
+      # sin acercarse al mem_limit del contenedor (3g), que a su vez deja ~1.5GB de margen sobre
+      # este -Xmx para metaspace/thread stacks/code cache/buffers directos que no cuentan contra
+      # el heap.
+      JAVA_OPTS: "-Xms512m -Xmx1536m"
+    # Sin `ports:` a propósito - ver el comentario de cabecera de este archivo. Nginx llega acá
+    # por nombre de servicio (http://backend:8080) dentro de la red interna que Compose crea sola;
+    # nada fuera del host Docker puede tocar este puerto directamente.
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: betedge-nginx
+    restart: unless-stopped
+    mem_limit: 256m
+    depends_on:
+      - backend
+    environment:
+      DOMAIN_NAME: ${DOMAIN_NAME:?set the real domain, ej. betedge-jdm.duckdns.org}
+    volumes:
+      # Los .template quedan disponibles DENTRO del contenedor bajo su nombre real de archivo -
+      # deploy/setup-tls.sh los referencia así (nginx.conf.template para la Fase 1 ya renderizada
+      # por `command` abajo, nginx-ssl.conf.template para cuando ese script active la Fase 2).
+      - ./deploy/nginx.conf.template:/etc/nginx/templates-src/nginx.conf.template:ro
+      - ./deploy/nginx-ssl.conf.template:/etc/nginx/templates-src/nginx-ssl.conf.template:ro
+      # Build estático del frontend (`npm run build` en frontend/, ANTES de este `up` - ver el
+      # checklist de despliegue en CLAUDE.md, no es un paso automático de este compose).
+      - ../frontend/dist:/usr/share/nginx/html:ro
+      # Compartidos con Certbot corriendo en el host (no en Docker - ver deploy/setup-tls.sh):
+      # el webroot para el challenge HTTP-01, y el certificado real que Certbot deja en
+      # /etc/letsencrypt en el host. Bind mounts, no volúmenes con nombre - tienen que ser las
+      # MISMAS rutas absolutas que ve Certbot corriendo nativo en la VM, no rutas gestionadas por
+      # Docker que Certbot nunca podría encontrar.
+      - /var/www/certbot:/var/www/certbot:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    # Renderiza SIEMPRE la Fase 1 (HTTP only) al arrancar/reiniciar el contenedor - correcto en el
+    # primer `up` (todavía no hay certificado). Si el contenedor se reinicia DESPUÉS de que
+    # deploy/setup-tls.sh ya activó la Fase 2, esto lo regresaría a HTTP solo - por diseño,
+    # setup-tls.sh no toca este `command`, así que un restart de Nginx (no de todo el compose)
+    # después de tener TLS configurado no debería volver a correr esto; si algún día hace falta un
+    # `docker compose up` completo después de tener TLS, hay que volver a correr la Fase 2 a mano
+    # (docker exec ... ver el paso 3 de setup-tls.sh) - anótalo en el checklist si esto muerde a
+    # alguien en la práctica.
+    # $$DOMAIN_NAME (doble $) a propósito - Compose interpola ${DOMAIN_NAME}/$VAR sueltos de este
+    # archivo YAML él mismo (por eso el de `environment:` arriba usa un solo $, se resuelve al
+    # correr `docker compose up`); acá el $$ le dice a Compose "no lo toques, pásalo literal" para
+    # que quede como $DOMAIN_NAME real dentro del contenedor - lo resuelve `envsubst` al arrancar,
+    # no Compose al parsear este archivo.
+    command: >
+      sh -c "envsubst '$$DOMAIN_NAME' < /etc/nginx/templates-src/nginx.conf.template > /etc/nginx/conf.d/default.conf
+      && exec nginx -g 'daemon off;'"
+
+volumes:
+  betedge_pgdata_prod:
