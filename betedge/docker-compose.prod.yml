@@ -87,6 +87,14 @@ services:
       # vez por default solo porque este es el compose de "producción". Ver CLAUDE.md/aplication.yml
       # para el presupuesto de cada uno antes de encender THEODDSAPI/hot-refresh.
       ODDS_INGESTION_SCHEDULING_ENABLED: ${ODDS_INGESTION_SCHEDULING_ENABLED:-true}
+      # Cadence + quota guard added 2026-09-09 - see odds-ingestion's own comment in
+      # application.yml for the full reasoning (cut to 1x/day while OddsPapi's free-tier reset
+      # behavior is unconfirmed). Defaults here match application.yml's own defaults, just made
+      # explicitly overridable from this file without a rebuild - set
+      # ODDS_INGESTION_CRON_SECONDARY=0 0 13 * * * to go back to 2x/day.
+      ODDS_INGESTION_CRON_PRIMARY: ${ODDS_INGESTION_CRON_PRIMARY:-0 0 4 * * *}
+      ODDS_INGESTION_CRON_SECONDARY: ${ODDS_INGESTION_CRON_SECONDARY:--}
+      ODDS_INGESTION_MIN_REMAINING_QUOTA: ${ODDS_INGESTION_MIN_REMAINING_QUOTA:-10}
       THEODDSAPI_INGESTION_SCHEDULING_ENABLED: ${THEODDSAPI_INGESTION_SCHEDULING_ENABLED:-false}
       HOT_REFRESH_SCHEDULING_ENABLED: ${HOT_REFRESH_SCHEDULING_ENABLED:-false}
       MATCH_STATUS_UPDATE_SCHEDULING_ENABLED: ${MATCH_STATUS_UPDATE_SCHEDULING_ENABLED:-false}

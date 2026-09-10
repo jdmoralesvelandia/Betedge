@@ -51,15 +51,20 @@ odds-ingestion:
   # OddsPapi requires exactly one 'bookmaker' AND at most 5 'tournamentIds' per
   # /odds-by-tournaments call. With 5 tracked leagues (Bundesliga and Brasileirão dropped - see
   # V19__narrow_league_coverage.sql) that's 1 tournament-id batch, so each cycle costs
-  # (bookmakers x batches) calls: 3 x 1 = 3. IngestionScheduler now runs at 2 fixed local times/day
-  # (4am, 1pm America/Bogota - see its @Scheduled crons) instead of a fixed interval: 3 calls x 2
-  # cycles/day x 30 days = 180/month, PLUS ReferenceDataScheduler's own 1 call/sync x 1 sync/day x
-  # 30 days = 30/month -> 210/month scheduled between the two schedulers. Budget is 250/month
-  # total, leaving 40/month (~6 manual triggers) as margin - same margin as before this rework,
-  # since dropping 2 leagues (fewer batches) and doubling cycles/day (cron vs the old 24h
-  # fixedRate) cancel out almost exactly. Recompute BOTH this scheduler and theoddsapi-ingestion's
-  # below if the bookmaker list, the tracked-league count, or either cron schedule changes - don't
-  # budget this block in isolation.
+  # (bookmakers x batches) calls: 3 x 1 = 3.
+  #
+  # Cadence reduced from 2x/day to 1x/day on 2026-09-09 (cron-secondary below defaults to "-",
+  # disabled - see IngestionScheduler's own comment) while OddsPapi's free-tier reset behavior
+  # (monthly vs lifetime) is still unconfirmed, and after finding that a shared dev/prod API key
+  # had already burned real quota via ReferenceDataSyncService's cold-start sync on every local
+  # backend restart (see that class's own Javadoc) - dev now uses its own separate key so this
+  # isn't the only mitigation, just the other half of it: 3 calls x 1 cycle/day x 30 days =
+  # 90/month, PLUS ReferenceDataScheduler's own 1 call/sync x 1 sync/day x 30 days = 30/month ->
+  # 120/month scheduled between the two schedulers, well under the 250/month plan cap - real
+  # margin instead of the previous 40/month. Recompute if the bookmaker list, the tracked-league
+  # count, or either cron schedule changes - don't budget this block in isolation. (TheOddsApi's
+  # own budget below is untouched by this change - its cap/reset is separate and confirmed
+  # monthly, not shared with OddsPapi's.)
   # pinnacle is the sharp reference book the true-probability estimate is built from; betano and
   # betplay replace bet365/unibet as the tracked retail books (2026-08-23 ingestion overhaul).
   # betano here is OddsPapi's generic/global slug "betano" (cloneOf: null) - NOT a regional
@@ -69,6 +74,17 @@ odds-ingestion:
   # against the real OddsPapi GET /bookmakers catalog on 2026-08-23; see V20__seed_betano_betplay_bookmakers.sql.
   bookmakers: ${ODDS_INGESTION_BOOKMAKERS:pinnacle,betano,betplay}
   scheduling-enabled: ${ODDS_INGESTION_SCHEDULING_ENABLED:true}
+  # First slot always on (4am America/Bogota). Second slot (1pm) disabled by default - see the
+  # cadence note above and IngestionScheduler's own comment on the "-" special value. To go back
+  # to 2x/day: set ODDS_INGESTION_CRON_SECONDARY=0 0 13 * * * (env var, no code change).
+  cron-primary: ${ODDS_INGESTION_CRON_PRIMARY:0 0 4 * * *}
+  cron-secondary: ${ODDS_INGESTION_CRON_SECONDARY:-}
+  # Quota guard (2026-09-09, see IngestionService.runIngestion): below this many remaining calls
+  # (read for free via GET /account, see OddsPapiClient.fetchAccountInfo), a SCHEDULED run skips
+  # its real calls entirely instead of risking a 429 mid-run - recorded as IngestionRunStatus
+  # .SKIPPED_LOW_QUOTA. 10 is a margin for ~3 more scheduled runs at today's 3-calls/run cost, not
+  # a technical minimum - a MANUAL trigger never skips regardless of this value.
+  min-remaining-quota: ${ODDS_INGESTION_MIN_REMAINING_QUOTA:10}
 
 # Paso C - independent scheduler, separate from odds-ingestion above. Covers the 5 competitions
 # with a "theoddsapi" externalKeys entry after V19 (La Liga, Premier League, Serie A, Bundesliga,

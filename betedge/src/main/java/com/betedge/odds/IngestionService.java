@@ -72,8 +72,30 @@ public class IngestionService {
     @Value("${odds-ingestion.bookmakers}")
     private List<String> targetBookmakers;
 
+    /**
+     * Safety margin for the quota guard below - "menos de N llamadas restantes" from GET
+     * /account (free, see OddsPapiClient.fetchAccountInfo). 10 is enough for ~3 more scheduled
+     * runs at today's 3-calls/run cost, not a hard technical minimum - adjust here, not by
+     * guessing at IngestionScheduler's cron.
+     */
+    @Value("${odds-ingestion.min-remaining-quota}")
+    private int minRemainingQuota;
+
     public IngestionRunResponse runIngestion(TriggeredBy triggeredBy) {
         Instant startedAt = Instant.now();
+
+        // SCHEDULED only - this guard exists for the unattended cron path (see
+        // IngestionScheduler), not for a human deliberately firing a MANUAL run, who should
+        // always get a real attempt regardless of quota. Checked even when there's still plenty
+        // of quota left (not just right before running out) purely to build a real trend over
+        // time (see IngestionRun.remainingQuota) - the endpoint itself is free either way.
+        Integer remainingQuota = triggeredBy == TriggeredBy.SCHEDULED ? fetchRemainingQuotaSafely() : null;
+        if (triggeredBy == TriggeredBy.SCHEDULED && (remainingQuota == null || remainingQuota < minRemainingQuota)) {
+            log.warn("Skipping scheduled OddsPapi ingestion: remaining quota {} is below the "
+                    + "configured safety margin ({}) - avoiding a real call that could 429 mid-run "
+                    + "instead of just not running", remainingQuota, minRemainingQuota);
+            return recordSkippedRun(startedAt, remainingQuota);
+        }
 
         List<Competition> competitions = competitionRepository.findAll();
         // Only competitions carrying an "oddspapi" key are relevant to this (OddsPapi-only) pass;
@@ -132,6 +154,7 @@ public class IngestionService {
         IngestionRun run = new IngestionRun();
         run.setProvider(DataSource.ODDSPAPI);
         run.setTriggeredBy(triggeredBy);
+        run.setRemainingQuota(remainingQuota);
         run.setStartedAt(startedAt);
         run.setFinishedAt(Instant.now());
         run.setTotalEventsReceived(breakdown.stream().mapToInt(CompetitionBreakdownEntry::eventsReceived).sum());
@@ -141,6 +164,44 @@ public class IngestionService {
         run.setSurebetsDetected(surebetsDetected);
         run.setCompetitionBreakdown(breakdown);
 
+        return IngestionRunResponse.from(ingestionRunRepository.save(run));
+    }
+
+    /**
+     * Reads GET /account's remaining-quota figure, never letting a failure of the check itself
+     * (the account endpoint being down, an unexpected response shape) throw out of runIngestion -
+     * returns null, which the SCHEDULED-only guard above treats as "couldn't confirm, skip
+     * rather than risk it" (fail closed), same as a genuinely low reading.
+     */
+    private Integer fetchRemainingQuotaSafely() {
+        try {
+            return oddsPapiClient.fetchAccountInfo().remainingRequests();
+        } catch (RestClientException e) {
+            log.error("Failed to fetch OddsPapi account/quota info via GET /account - treating "
+                    + "remaining quota as unknown", e);
+            return null;
+        }
+    }
+
+    /**
+     * Minimal IngestionRun row for a SCHEDULED run that never attempted a single real
+     * /odds-by-tournaments call - zeroed event/match/odds/opportunity counts and an empty
+     * breakdown are the honest values here (nothing was fetched), not placeholders.
+     */
+    private IngestionRunResponse recordSkippedRun(Instant startedAt, Integer remainingQuota) {
+        IngestionRun run = new IngestionRun();
+        run.setProvider(DataSource.ODDSPAPI);
+        run.setTriggeredBy(TriggeredBy.SCHEDULED);
+        run.setStatus(IngestionRunStatus.SKIPPED_LOW_QUOTA);
+        run.setRemainingQuota(remainingQuota);
+        run.setStartedAt(startedAt);
+        run.setFinishedAt(Instant.now());
+        run.setTotalEventsReceived(0);
+        run.setTotalNewMatches(0);
+        run.setTotalNewOdds(0);
+        run.setValueBetsDetected(0);
+        run.setSurebetsDetected(0);
+        run.setCompetitionBreakdown(List.of());
         return IngestionRunResponse.from(ingestionRunRepository.save(run));
     }
 

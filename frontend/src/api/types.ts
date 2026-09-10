@@ -99,6 +99,13 @@ export interface OddsHistoryResponseDto {
 
 export type TriggeredBy = 'SCHEDULED' | 'MANUAL'
 
+/**
+ * COMPLETED covers every run before 2026-09-09 (the field didn't exist yet) plus every ordinary
+ * run since. SKIPPED_LOW_QUOTA is OddsPapi-only, SCHEDULED-only (see IngestionService.runIngestion's
+ * quota guard) - a MANUAL trigger always goes through for real, low quota or not.
+ */
+export type IngestionRunStatus = 'COMPLETED' | 'SKIPPED_LOW_QUOTA'
+
 export interface CompetitionBreakdownEntryDto {
   competitionName: string
   eventsReceived: number
@@ -109,6 +116,14 @@ export interface CompetitionBreakdownEntryDto {
 export interface IngestionRunDto {
   id: number
   triggeredBy: TriggeredBy
+  status: IngestionRunStatus
+  /**
+   * OddsPapi's remaining requests under GET /account, read only for a SCHEDULED run (see
+   * IngestionService.runIngestion) - always null for MANUAL/HOT_REFRESH runs (never checked, by
+   * design, not because something went wrong) and for every The Odds API run (that pipeline
+   * never calls this endpoint at all).
+   */
+  remainingQuota: number | null
   startedAt: string
   finishedAt: string
   totalEventsReceived: number

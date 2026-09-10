@@ -74,6 +74,25 @@ public class OddsPapiClient {
     }
 
     /**
+     * GET /account - confirmed unmetered against OddsPapi's own docs
+     * (oddspapi.io/en/docs/requests-and-quota, 2026-09-09): listed explicitly under "Unmetered
+     * endpoints (do NOT count, and are never blocked)" and "always accessible, even after your
+     * quota is exhausted" - safe to call before every scheduled ingestion run without spending
+     * any of the budget it exists to protect. See IngestionService.runIngestion's quota guard.
+     */
+    public OddsPapiAccountDto fetchAccountInfo() {
+        OddsPapiAccountDto account = restClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/account")
+                        .queryParam("apiKey", apiKey)
+                        .build())
+                .retrieve()
+                .body(OddsPapiAccountDto.class);
+
+        return account != null ? account : new OddsPapiAccountDto(null, List.of());
+    }
+
+    /**
      * Confirmed against a real response: OddsPapi ignores any participant-id
      * filter and always returns the full participant directory for the given
      * sport (~19k entries for soccer), keyed by participant id as a string.

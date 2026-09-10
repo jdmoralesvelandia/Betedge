@@ -5,6 +5,33 @@ import type { Fetcher } from '../api/endpoints'
 import type { IngestionRunDto } from '../api/types'
 import { formatRelativeToNow } from '../lib/format'
 
+/**
+ * Mirrors the backend's odds-ingestion.min-remaining-quota default (application.yml) - there's
+ * no live wiring between the two (this is presentation-only, see IngestionAdminController; the
+ * actual skip decision already happened server-side by the time this DTO exists), so keep this
+ * in sync by hand if that property's default ever changes.
+ */
+const LOW_QUOTA_WARNING_THRESHOLD = 10
+
+/**
+ * A COMPLETED run that fetched nothing new while quota was already low/unconfirmed - the 2026-09-09
+ * diagnostic's own finding: OddsPapi returning 429 mid-run (cuenta agotada, ya sea por una corrida
+ * MANUAL o porque el guard de SCHEDULED no alcanzó a prevenirlo) never fails visibly - every call
+ * failure is caught per-call and only logged server-side, so the run just looks like an ordinary
+ * "nothing new" cycle. Deliberately presentation-only (no backend status change): scoped to
+ * SCHEDULED because remainingQuota is null by design for MANUAL/HOT_REFRESH (never checked, not
+ * because anything went wrong there) - applying this to MANUAL runs would flag every ordinary
+ * "prices didn't move" manual trigger as if it were quota-starved.
+ */
+function looksQuotaStarved(run: IngestionRunDto): boolean {
+  return (
+    run.triggeredBy === 'SCHEDULED' &&
+    run.status === 'COMPLETED' &&
+    run.totalNewOdds === 0 &&
+    (run.remainingQuota === null || run.remainingQuota < LOW_QUOTA_WARNING_THRESHOLD)
+  )
+}
+
 interface IngestionRunPanelProps {
   title: string
   description: string
@@ -74,6 +101,16 @@ export function IngestionRunPanel({ title, description, buttonLabel, fetchLastRu
                 <span className="rounded-full bg-surface-2 px-2 py-0.5 font-medium text-ink-soft">
                   {lastRun.triggeredBy === 'MANUAL' ? 'Manual' : 'Programada'}
                 </span>
+                {lastRun.status === 'SKIPPED_LOW_QUOTA' && (
+                  <span className="rounded-full bg-warning-soft px-2 py-0.5 font-medium text-warning">
+                    Cupo bajo — corrida saltada
+                  </span>
+                )}
+                {looksQuotaStarved(lastRun) && (
+                  <span className="rounded-full bg-warning-soft px-2 py-0.5 font-medium text-warning">
+                    Sin odds nuevas — cupo bajo o desconocido
+                  </span>
+                )}
                 <span>
                   Última actualización: <span className="text-ink-soft">{formatRelativeToNow(lastRun.finishedAt)}</span>
                 </span>
@@ -85,6 +122,9 @@ export function IngestionRunPanel({ title, description, buttonLabel, fetchLastRu
               <Stat label="Surebets" value={lastRun.surebetsDetected} />
               <Stat label="Eventos recibidos" value={lastRun.totalEventsReceived} />
               <Stat label="Matches nuevos" value={lastRun.totalNewMatches} />
+              {lastRun.remainingQuota !== null && (
+                <Stat label="Cupo restante (OddsPapi)" value={lastRun.remainingQuota} />
+              )}
             </div>
 
             <table className="w-full border-collapse text-left text-sm">
