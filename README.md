@@ -1,6 +1,6 @@
 # BetEdge
 
-Detecta automáticamente **value bets** y **surebets** en fútbol, cruzando las cuotas de dos proveedores independientes para calcular un consenso de mercado en tiempo real.
+Detecta automáticamente **value bets** y **surebets** en fútbol, cruzando las cuotas de dos proveedores independientes para calcular un consenso de mercado actualizado varias veces al día.
 
 **🔴 En vivo: [betedge-jdm.duckdns.org](https://betedge-jdm.duckdns.org)** — cuenta demo precargada en el login (`demo@betedge.com` / `Demo1234!`), sin registro necesario.
 
@@ -12,7 +12,7 @@ Las casas de apuestas no publican la probabilidad real de un resultado — publi
 
 Con el consenso ya calculado, comparar cada cuota individual contra él es directo. Cuando una casa específica ofrece una cuota mejor de lo que el consenso dice que debería valer, esa diferencia es el **edge** de un *value bet*: una apuesta con expectativa matemática a favor, no una ganancia garantizada — depende de que el consenso tenga razón. Un *surebet* es distinto: combinando las mejores cuotas de casas distintas para cada resultado posible, a veces lo que hay que apostar en cada una suma menos del 100%. Repartiendo el dinero entre las tres, la ganancia queda garantizada sin importar el resultado real del partido.
 
-El sistema ingiere cuotas de **OddsPapi** (fuente principal) y **The Odds API** (fuente complementaria) para seis ligas — Premier League, La Liga, Serie A, Bundesliga, Ligue 1 y Champions League —, reconcilia el mismo partido real visto por ambas fuentes en una sola entidad, recalcula el consenso en cada ciclo de ingesta, y guarda el historial completo de cada cuota por casa de apuestas para poder ver cómo se movió el mercado antes del pitazo inicial.
+El sistema ingiere cuotas de **OddsPapi** y **The Odds API**, dos fuentes independientes que alimentan el mismo cálculo de consenso sin que ninguna tenga prioridad sobre la otra, para seis ligas: Premier League, La Liga, Serie A, Bundesliga, Ligue 1 y Champions League. Reconcilia el mismo partido real visto por ambas fuentes en una sola entidad, recalcula el consenso en cada ciclo de ingesta, y guarda el historial completo de cada cuota por casa de apuestas para poder ver cómo se movió el mercado antes del pitazo inicial.
 
 ## Capturas
 
@@ -34,8 +34,8 @@ Las tres son capturas reales del sitio en producción (Playwright headless, cuen
 
 ```mermaid
 flowchart LR
-    OP["OddsPapi<br/>(fuente principal)"] -->|cron 2×/día| ING
-    TA["The Odds API<br/>(fuente complementaria)"] -->|cron 3×/día| ING
+    OP["OddsPapi"] -->|cron 2×/día| ING
+    TA["The Odds API"] -->|cron 3×/día| ING
 
     subgraph BE["Backend · Spring Boot"]
         direction TB
